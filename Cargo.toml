@@ -1,0 +1,18 @@
+[package]
+name = "buvc-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ark-std = { version = "0.4.0" }
+ark-ec = { version = "0.4.0" }
+ark-ff = { version = "0.4.0", features = ["asm"] }
+ark-bls12-381 = { version = "0.4.0" }
+ark-poly = { version = "0.4.0" }
+ark-serialize = { version = "0.4.0", features = ["derive"] }
+
+log = { version = "0.4.21" }
+
+[dev-dependencies]
+clap = "4.5.4"
+env_logger = "0.11.3"
