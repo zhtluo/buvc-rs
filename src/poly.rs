@@ -30,6 +30,7 @@ where
     T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy,
 {
     let n = n.next_power_of_two();
+    assert!(n.is_power_of_two());
     assert!(n <= unity.len());
     a.resize_with(n, Default::default);
     let mut j = 0;
@@ -68,6 +69,7 @@ where
     T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy,
 {
     let n = n.next_power_of_two();
+    assert!(n.is_power_of_two());
     assert!(n <= unity.len());
     a.resize_with(n, Default::default);
     let mut j = 0;
@@ -197,6 +199,9 @@ pub fn poly_interpolate(unity: &[Fr], x: &[Fr], y: &[Fr]) -> Vec<Fr> {
         let mut i = 0;
         while i < x.len() {
             if i + (1 << layer) < x.len() {
+                let overflow_flag =
+                    m[i].len() == (1 << layer) + 1 && m[i + (1 << layer)].len() == (1 << layer) + 1;
+
                 poly_fft(unity, &mut f[i], 1 << layer + 1);
                 poly_fft(unity, &mut f[i + (1 << layer)], 1 << layer + 1);
                 poly_fft(unity, &mut m[i], 1 << layer + 1);
@@ -225,6 +230,11 @@ pub fn poly_interpolate(unity: &[Fr], x: &[Fr], y: &[Fr]) -> Vec<Fr> {
                     .map(|(i, j)| i * j)
                     .collect();
                 poly_ifft(unity, &mut m[i], 1 << layer + 1);
+
+                if overflow_flag {
+                    m[i][0] -= Fr::ONE;
+                    m[i].push(Fr::ONE);
+                }
             }
             i += 1 << layer + 1;
         }
