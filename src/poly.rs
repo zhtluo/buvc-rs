@@ -1,12 +1,13 @@
+use std::cmp::max;
+use std::iter;
+use std::ops::Add;
+use std::ops::Mul;
+use std::ops::Sub;
+
 /// This module handles all polynomial operations.
-///
 use ark_bls12_381::fr::Fr;
-use ark_ff::{FftField, Field};
-use std::{
-    cmp::max,
-    iter,
-    ops::{Add, Mul, Sub},
-};
+use ark_ff::FftField;
+use ark_ff::Field;
 
 /// Compute all unity of roots for n
 pub fn compute_unity(n: usize) -> Vec<Fr> {
@@ -120,7 +121,7 @@ pub fn poly_zero_inner(
         result[n] = vec![-x[l], Fr::ONE];
         return;
     }
-    let m = l + r >> 1;
+    let m = (l + r) >> 1;
     poly_zero_inner(unity, x, result, n << 1, l, m);
     poly_zero_inner(unity, x, result, n << 1 | 1, m, r);
     let mut polyl = result[n << 1].clone();
@@ -148,21 +149,21 @@ pub fn poly_zero(unity: &[Fr], x: &[Fr]) -> Vec<Fr> {
                 let overflow_flag = poly[i].len() == (1 << layer) + 1
                     && poly[i + (1 << layer)].len() == (1 << layer) + 1;
 
-                poly_fft(unity, &mut poly[i], 1 << layer + 1);
-                poly_fft(unity, &mut poly[i + (1 << layer)], 1 << layer + 1);
+                poly_fft(unity, &mut poly[i], 1 << (layer + 1));
+                poly_fft(unity, &mut poly[i + (1 << layer)], 1 << (layer + 1));
                 poly[i] = poly[i]
                     .iter()
                     .zip(poly[i + (1 << layer)].iter())
                     .map(|(i, j)| i * j)
                     .collect();
-                poly_ifft(unity, &mut poly[i], 1 << layer + 1);
+                poly_ifft(unity, &mut poly[i], 1 << (layer + 1));
 
                 if overflow_flag {
                     poly[i][0] -= Fr::ONE;
                     poly[i].push(Fr::ONE);
                 }
             }
-            i += 1 << layer + 1;
+            i += 1 << (layer + 1);
         }
     }
 
@@ -202,10 +203,10 @@ pub fn poly_interpolate(unity: &[Fr], x: &[Fr], y: &[Fr]) -> Vec<Fr> {
                 let overflow_flag =
                     m[i].len() == (1 << layer) + 1 && m[i + (1 << layer)].len() == (1 << layer) + 1;
 
-                poly_fft(unity, &mut f[i], 1 << layer + 1);
-                poly_fft(unity, &mut f[i + (1 << layer)], 1 << layer + 1);
-                poly_fft(unity, &mut m[i], 1 << layer + 1);
-                poly_fft(unity, &mut m[i + (1 << layer)], 1 << layer + 1);
+                poly_fft(unity, &mut f[i], 1 << (layer + 1));
+                poly_fft(unity, &mut f[i + (1 << layer)], 1 << (layer + 1));
+                poly_fft(unity, &mut m[i], 1 << (layer + 1));
+                poly_fft(unity, &mut m[i + (1 << layer)], 1 << (layer + 1));
 
                 let mut fa = f[i]
                     .iter()
@@ -217,8 +218,8 @@ pub fn poly_interpolate(unity: &[Fr], x: &[Fr], y: &[Fr]) -> Vec<Fr> {
                     .zip(m[i].iter())
                     .map(|(i, j)| i * j)
                     .collect();
-                poly_ifft(unity, &mut fa, 1 << layer + 1);
-                poly_ifft(unity, &mut fb, 1 << layer + 1);
+                poly_ifft(unity, &mut fa, 1 << (layer + 1));
+                poly_ifft(unity, &mut fb, 1 << (layer + 1));
                 f[i].resize(max(fa.len(), fb.len()), Fr::ZERO);
                 for j in 0..f[i].len() {
                     f[i][j] = (if j < fa.len() { fa[j] } else { Fr::ZERO })
@@ -229,14 +230,14 @@ pub fn poly_interpolate(unity: &[Fr], x: &[Fr], y: &[Fr]) -> Vec<Fr> {
                     .zip(m[i + (1 << layer)].iter())
                     .map(|(i, j)| i * j)
                     .collect();
-                poly_ifft(unity, &mut m[i], 1 << layer + 1);
+                poly_ifft(unity, &mut m[i], 1 << (layer + 1));
 
                 if overflow_flag {
                     m[i][0] -= Fr::ONE;
                     m[i].push(Fr::ONE);
                 }
             }
-            i += 1 << layer + 1;
+            i += 1 << (layer + 1);
         }
     }
 
@@ -316,7 +317,7 @@ pub fn poly_evaluate_inner(
             .fold(Fr::default(), |acc, &coeff| acc * x[l] + coeff);
         return;
     }
-    let m = l + r >> 1;
+    let m = (l + r) >> 1;
     let (_ql, rl) = poly_divide(unity, poly.to_vec(), zero[n << 1].clone());
     let (_qr, rr) = poly_divide(unity, poly.to_vec(), zero[n << 1 | 1].clone());
     poly_evaluate_inner(unity, &rl, x, zero, result, n << 1, l, m);
@@ -344,10 +345,10 @@ mod tests {
         assert_eq!(
             poly_evaluate(
                 &unity,
-                &[3, 2, 1].map(|i| Fr::from(i)),
-                &[1, 2, 3].map(|i| Fr::from(i))
+                &[3, 2, 1].map(Fr::from),
+                &[1, 2, 3].map(Fr::from)
             ),
-            [6, 11, 18].map(|i| Fr::from(i)).to_vec()
+            [6, 11, 18].map(Fr::from).to_vec()
         );
     }
 
@@ -355,7 +356,7 @@ mod tests {
     fn test_poly_zero_inner() {
         let unity = compute_unity(1 << 3);
         let mut result = vec![Vec::<Fr>::new(); 8 << 2];
-        let x = [1, 2, 4, 5, 6].map(|i| Fr::from(i));
+        let x = [1, 2, 4, 5, 6].map(Fr::from);
         poly_zero_inner(&unity, &x, &mut result, 1, 0, 5);
         let z = poly_zero(&unity, &x);
         assert_eq!(z, result[1]);

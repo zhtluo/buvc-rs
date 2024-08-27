@@ -1,15 +1,24 @@
-use crate::{
-    poly::{compute_unity, poly_delta, poly_fft, poly_ifft, poly_interpolate, poly_zero},
-    vc_parameter::VcParameter,
-};
-use ark_bls12_381::{fr::Fr, Bls12_381, G1Projective as G1, G2Projective as G2};
-use ark_ec::{pairing::Pairing, Group};
-use ark_ff::{
-    fields::{FftField, Field},
-    Zero,
-};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use std::iter;
+
+use ark_bls12_381::fr::Fr;
+use ark_bls12_381::Bls12_381;
+use ark_bls12_381::G1Projective as G1;
+use ark_bls12_381::G2Projective as G2;
+use ark_ec::pairing::Pairing;
+use ark_ec::Group;
+use ark_ff::fields::FftField;
+use ark_ff::fields::Field;
+use ark_ff::Zero;
+use ark_serialize::CanonicalDeserialize;
+use ark_serialize::CanonicalSerialize;
+
+use crate::poly::compute_unity;
+use crate::poly::poly_delta;
+use crate::poly::poly_fft;
+use crate::poly::poly_ifft;
+use crate::poly::poly_interpolate;
+use crate::poly::poly_zero;
+use crate::vc_parameter::VcParameter;
 
 /// Precomputed context in VC
 #[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
@@ -44,14 +53,14 @@ impl VcContext {
             .collect();
         poly_fft(&unity, &mut gll, n);
 
-        return VcContext {
+        VcContext {
             n,
             logn,
             nf: Fr::from(n as u32),
             unity,
             gl,
             gll,
-        };
+        }
     }
 
     /// Single-point verification
@@ -83,8 +92,8 @@ impl VcContext {
         let step = unity.len() / n;
 
         let x = &index.iter().map(|i| unity[*i * step]).collect::<Vec<Fr>>();
-        let z = poly_zero(unity, &x);
-        let lag = poly_interpolate(unity, &x, value);
+        let z = poly_zero(unity, x);
+        let lag = poly_interpolate(unity, x, value);
 
         let lhs = Bls12_381::pairing(gq, (0..z.len()).map(|i| gs2[i] * z[i]).sum::<G2>());
         let rhs = Bls12_381::pairing(
@@ -144,17 +153,17 @@ impl VcContext {
         let unity = &self.unity;
         let step = unity.len() / n;
         let x = &index.iter().map(|i| unity[*i * step]).collect::<Vec<Fr>>();
-        let d = poly_delta(unity, &x);
+        let d = poly_delta(unity, x);
         (0..index.len()).map(|i| gq[i] * (Fr::ONE / d[i])).sum()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use crate::vc_parameter::tests::test_parameter;
     use ark_ff::Field;
+
+    use super::*;
+    use crate::vc_parameter::tests::test_parameter;
 
     #[test]
     fn test_vc_context_new() {
@@ -171,8 +180,8 @@ mod tests {
             let mut x_power = Fr::ONE;
             gl.push(G1::zero());
             for j in 0..n {
-                gl[i] = gl[i] + gs1[n - j - 1] * x_power;
-                x_power = x_power * unity[i * step];
+                gl[i] += gs1[n - j - 1] * x_power;
+                x_power *= unity[i * step];
             }
         }
 
@@ -183,8 +192,8 @@ mod tests {
             let mut x_power = Fr::ONE;
             gll.push(G1::zero());
             for j in 0..n - 1 {
-                gll[i] = gll[i] + gs1[n - j - 2] * (Fr::from((j + 1) as u32) * x_power);
-                x_power = x_power * unity[i * step];
+                gll[i] += gs1[n - j - 2] * (Fr::from((j + 1) as u32) * x_power);
+                x_power *= unity[i * step];
             }
         }
 
@@ -196,7 +205,7 @@ mod tests {
         let (s, vc_p) = test_parameter();
         let vc_c = VcContext::new(&vc_p, 1);
         let n = vc_c.n;
-        let v = [0, 1].map(|i| Fr::from(i));
+        let v = [0, 1].map(Fr::from);
         let unity = &vc_c.unity;
         let step = unity.len() / n;
 
@@ -218,7 +227,7 @@ mod tests {
     fn test_vc_context_verify() {
         let (_s, vc_p) = test_parameter();
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
-        let v = [1, 4, 5, 2, 3, 6, 7, 0].map(|i| Fr::from(i));
+        let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
 
         let n = vc_c.n;
         let (gc, gq) = vc_c.build_commitment(&v);
@@ -234,16 +243,16 @@ mod tests {
     fn test_vc_context_verify_multi() {
         let (_s, vc_p) = test_parameter();
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
-        let v = [1, 4, 5, 2, 3, 6, 7, 0].map(|i| Fr::from(i));
+        let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
 
         let (gc, gq) = vc_c.build_commitment(&v);
         let gqq = vc_c.aggregate_proof(&[0, 1, 2], &gq[0..=2]);
         assert!(vc_c.verify_multi(&vc_p, gc, &[0, 1, 2], &v[0..=2], gqq));
-        
+
         let (gc, gq) = vc_c.build_commitment(&v);
         let gqq = vc_c.aggregate_proof(&[1, 2, 3], &gq[1..=3]);
         assert!(vc_c.verify_multi(&vc_p, gc, &[1, 2, 3], &v[1..=3], gqq));
-        
+
         let (gc, gq) = vc_c.build_commitment(&v);
         let gqq = vc_c.aggregate_proof(&[1, 2, 3, 4], &gq[1..=4]);
         assert!(vc_c.verify_multi(&vc_p, gc, &[1, 2, 3, 4], &v[1..=4], gqq));
