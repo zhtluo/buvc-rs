@@ -149,6 +149,17 @@ impl VcContext {
         (gc, gq)
     }
 
+    /// Update commitment with a new delta
+    pub fn update_commitment(&self, gc: G1, index: usize, value: Fr) -> G1 {
+        let n = self.n;
+        let nf = self.nf;
+        let unity = &self.unity;
+        let step = unity.len() / n;
+        let gl = &self.gl;
+
+        gc + gl[index] * (value * unity[index * step] / nf)
+    }
+
     /// Update witnesses given updates (\alpha, \beta)
     /// elements in \alpha must be different from index
     /// Test TBD
