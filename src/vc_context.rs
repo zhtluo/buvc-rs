@@ -11,9 +11,11 @@ use ark_ff::fields::Field;
 use ark_ff::Zero;
 use ark_serialize::CanonicalDeserialize;
 use ark_serialize::CanonicalSerialize;
+use ark_std::iterable::Iterable;
 
 use crate::poly::compute_unity;
 use crate::poly::poly_delta;
+use crate::poly::poly_evaluate;
 use crate::poly::poly_fft;
 use crate::poly::poly_ifft;
 use crate::poly::poly_interpolate;
@@ -145,6 +147,57 @@ impl VcContext {
             .collect();
 
         (gc, gq)
+    }
+
+    /// Update witnesses given updates (\alpha, \beta)
+    /// elements in \alpha must be different from index
+    /// Test TBD
+    pub fn update_witnesses_batch_different(
+        &self,
+        alpha: &[usize],
+        gq: &[G1],
+        beta: &[usize],
+        value: &[Fr],
+    ) -> Vec<G1> {
+        let nf = &self.nf;
+        let unity = &self.unity;
+
+        let walpha = alpha.iter().map(|i| unity[*i]).collect::<Vec<Fr>>();
+        let wbeta = beta.iter().map(|i| unity[*i]).collect::<Vec<Fr>>();
+        let z = poly_zero(unity, &walpha);
+
+        let zz = z
+            .iter()
+            .skip(1)
+            .enumerate()
+            .map(|(i, x)| x * &Fr::from((i + 1) as u32))
+            .collect::<Vec<Fr>>();
+
+        let zwindex = poly_evaluate(unity, &z, &wbeta);
+        let zzwalpha = poly_evaluate(unity, &zz, &walpha);
+
+        let ya: Vec<Fr> = value
+            .iter()
+            .zip(walpha.iter().zip(zzwalpha.iter()))
+            .map(|(v, (u, a))| v * u / nf * a)
+            .collect();
+        let yb: Vec<G1> = ya
+            .iter()
+            .enumerate()
+            .map(|(i, v)| self.gl[alpha[i]] * v)
+            .collect();
+        let ha = poly_interpolate(&self.unity, &walpha, &ya);
+        let hb = poly_interpolate(&self.unity, &walpha, &yb);
+
+        let evala = poly_evaluate(&self.unity, &ha, &wbeta);
+        let evalb = poly_evaluate(&self.unity, &hb, &wbeta);
+
+        let lindex = beta.iter().map(|i| self.gl[*i]);
+        gq.iter()
+            .zip(evala.iter().zip(evalb.iter()))
+            .zip(zwindex.iter().zip(lindex))
+            .map(|((g, (a, b)), (z, l))| g + l * (a / z) - *b * (Fr::ONE / z))
+            .collect()
     }
 
     /// Produce a multi-proof given a list of proofs

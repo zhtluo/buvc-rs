@@ -19,8 +19,11 @@ pub fn compute_unity(n: usize) -> Vec<Fr> {
 }
 
 /// Trim additional zeroes at the end of the polynomial.
-pub fn trim_zeroes(p: &mut Vec<Fr>) {
-    while !p.is_empty() && p[p.len() - 1] == Fr::ZERO {
+pub fn trim_zeroes<T>(p: &mut Vec<T>)
+where
+    T: PartialEq + Default + Copy,
+{
+    while !p.is_empty() && p[p.len() - 1] == T::default() {
         p.pop();
     }
 }
@@ -103,9 +106,7 @@ where
     }
 
     let inv_n = Fr::ONE / Fr::from(n as u32);
-    for i in 0..n {
-        a[i] = a[i] * inv_n;
-    }
+    a.iter_mut().for_each(|i| *i = *i * inv_n);
 }
 
 /// Compute the zeroing polynomial in O(mlog^2 m), storing all intermediate results.
@@ -184,14 +185,17 @@ pub fn poly_delta(unity: &[Fr], x: &[Fr]) -> Vec<Fr> {
 }
 
 /// Interpolate polynomial
-pub fn poly_interpolate(unity: &[Fr], x: &[Fr], y: &[Fr]) -> Vec<Fr> {
+pub fn poly_interpolate<T>(unity: &[Fr], x: &[Fr], y: &[T]) -> Vec<T>
+where
+    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+{
     let logi = x.len().next_power_of_two().trailing_zeros();
 
     let d = poly_delta(unity, x);
-    let mut f: Vec<Vec<Fr>> = Vec::with_capacity(x.len());
+    let mut f: Vec<Vec<T>> = Vec::with_capacity(x.len());
     let mut m: Vec<Vec<Fr>> = Vec::with_capacity(x.len());
     for i in 0..x.len() {
-        f.push(vec![y[i] / d[i]]);
+        f.push(vec![y[i] * (Fr::ONE / d[i])]);
     }
     for i in x {
         m.push(vec![-*i, Fr::ONE]);
@@ -211,19 +215,19 @@ pub fn poly_interpolate(unity: &[Fr], x: &[Fr], y: &[Fr]) -> Vec<Fr> {
                 let mut fa = f[i]
                     .iter()
                     .zip(m[i + (1 << layer)].iter())
-                    .map(|(i, j)| i * j)
+                    .map(|(i, j)| *i * *j)
                     .collect();
                 let mut fb = f[i + (1 << layer)]
                     .iter()
                     .zip(m[i].iter())
-                    .map(|(i, j)| i * j)
+                    .map(|(i, j)| *i * *j)
                     .collect();
                 poly_ifft(unity, &mut fa, 1 << (layer + 1));
                 poly_ifft(unity, &mut fb, 1 << (layer + 1));
-                f[i].resize(max(fa.len(), fb.len()), Fr::ZERO);
+                f[i].resize(max(fa.len(), fb.len()), T::default());
                 for j in 0..f[i].len() {
-                    f[i][j] = (if j < fa.len() { fa[j] } else { Fr::ZERO })
-                        + (if j < fb.len() { fb[j] } else { Fr::ZERO });
+                    f[i][j] = (if j < fa.len() { fa[j] } else { T::default() })
+                        + (if j < fb.len() { fb[j] } else { T::default() });
                 }
                 m[i] = m[i]
                     .iter()
@@ -271,7 +275,10 @@ pub fn poly_inverse(unity: &[Fr], mut poly: Vec<Fr>, m: usize) -> Vec<Fr> {
 }
 
 /// Poly division
-pub fn poly_divide(unity: &[Fr], mut f: Vec<Fr>, mut g: Vec<Fr>) -> (Vec<Fr>, Vec<Fr>) {
+pub fn poly_divide<T>(unity: &[Fr], mut f: Vec<T>, mut g: Vec<Fr>) -> (Vec<T>, Vec<T>)
+where
+    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+{
     trim_zeroes(&mut f);
     trim_zeroes(&mut g);
     let n = f.len().next_power_of_two();
@@ -282,39 +289,41 @@ pub fn poly_divide(unity: &[Fr], mut f: Vec<Fr>, mut g: Vec<Fr>) -> (Vec<Fr>, Ve
     let mut gi = poly_inverse(unity, gg, f.len() - g.len() + 1);
     poly_fft(unity, &mut ff, n);
     poly_fft(unity, &mut gi, n);
-    let mut q = ff.iter().zip(gi.iter()).map(|(i, j)| i * j).collect();
+    let mut q = ff.iter().zip(gi.iter()).map(|(i, j)| *i * *j).collect();
     poly_ifft(unity, &mut q, n);
-    q.resize(f.len() - g.len() + 1, Fr::ZERO);
+    q.resize(f.len() - g.len() + 1, T::default());
     q.reverse();
     let qq = q.clone();
 
     poly_fft(unity, &mut q, n);
     poly_fft(unity, &mut g, n);
-    let mut gq = g.iter().zip(q.iter()).map(|(i, j)| i * j).collect();
+    let mut gq = g.iter().zip(q.iter()).map(|(i, j)| *j * *i).collect();
     poly_ifft(unity, &mut gq, n);
-    let mut r: Vec<Fr> = Vec::with_capacity(f.len());
+    let mut r: Vec<T> = Vec::with_capacity(f.len());
     for i in 0..f.len() {
-        r.push(f[i] - (if i < gq.len() { gq[i] } else { Fr::ZERO }));
+        r.push(f[i] - (if i < gq.len() { gq[i] } else { T::default() }));
     }
     trim_zeroes(&mut r);
     (qq, r)
 }
 
-pub fn poly_evaluate_inner(
+pub fn poly_evaluate_inner<T>(
     unity: &[Fr],
-    poly: &[Fr],
+    poly: &[T],
     x: &[Fr],
     zero: &[Vec<Fr>],
-    result: &mut [Fr],
+    result: &mut [T],
     n: usize,
     l: usize,
     r: usize,
-) {
+) where
+    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+{
     if l + 1 == r {
         result[l] = poly
             .iter()
             .rev()
-            .fold(Fr::default(), |acc, &coeff| acc * x[l] + coeff);
+            .fold(T::default(), |acc, &coeff| acc * x[l] + coeff);
         return;
     }
     let m = (l + r) >> 1;
@@ -325,10 +334,13 @@ pub fn poly_evaluate_inner(
 }
 
 /// Evaluate poly at a list of points
-pub fn poly_evaluate(unity: &[Fr], poly: &[Fr], x: &[Fr]) -> Vec<Fr> {
+pub fn poly_evaluate<T>(unity: &[Fr], poly: &[T], x: &[Fr]) -> Vec<T>
+where
+    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+{
     let mut zero = vec![Vec::<Fr>::new(); x.len() << 2];
     poly_zero_inner(unity, x, &mut zero, 1, 0, x.len());
-    let mut result = vec![Fr::ZERO; x.len()];
+    let mut result = vec![T::default(); x.len()];
     poly_evaluate_inner(unity, poly, x, &zero, &mut result, 1, 0, x.len());
     result
 }
@@ -343,11 +355,7 @@ mod tests {
     fn test_poly_evaluate() {
         let unity = compute_unity(1 << 3);
         assert_eq!(
-            poly_evaluate(
-                &unity,
-                &[3, 2, 1].map(Fr::from),
-                &[1, 2, 3].map(Fr::from)
-            ),
+            poly_evaluate(&unity, &[3, 2, 1].map(Fr::from), &[1, 2, 3].map(Fr::from)),
             [6, 11, 18].map(Fr::from).to_vec()
         );
     }
