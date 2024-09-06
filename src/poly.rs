@@ -281,17 +281,20 @@ where
 {
     trim_zeroes(&mut f);
     trim_zeroes(&mut g);
+    if f.len() < g.len() {
+        return (vec![T::default(); 1], f);
+    }
     let n = f.len().next_power_of_two();
     let mut ff = f.clone();
     let mut gg = g.clone();
     ff.reverse();
     gg.reverse();
-    let mut gi = poly_inverse(unity, gg, f.len() - g.len() + 1);
+    let mut gi = poly_inverse(unity, gg, f.len() + 1 - g.len());
     poly_fft(unity, &mut ff, n);
     poly_fft(unity, &mut gi, n);
     let mut q = ff.iter().zip(gi.iter()).map(|(i, j)| *i * *j).collect();
     poly_ifft(unity, &mut q, n);
-    q.resize(f.len() - g.len() + 1, T::default());
+    q.resize(f.len() + 1 - g.len(), T::default());
     q.reverse();
     let qq = q.clone();
 
