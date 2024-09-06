@@ -1,4 +1,5 @@
 use std::iter;
+use std::cmp::Ordering; // Import Ordering for comparison
 
 use ark_bls12_381::fr::Fr;
 use ark_bls12_381::Bls12_381;
@@ -158,6 +159,81 @@ impl VcContext {
         let gl = &self.gl;
 
         gc + gl[index] * (value * unity[index * step] / nf)
+    }
+
+    pub fn update_witness_batchpub(
+        &self,
+        alpha: &[usize], // Indices of the proofs
+        gq: &[G1],       // The G1 elements corresponding to the proofs
+        beta: &[usize],  // Indices of the modifications
+        value: &[Fr],    // The Fr elements corresponding to the modifications
+    ) -> () {
+    
+        // Sorting the indices if necessary
+        let mut sorted_alpha = alpha.to_vec();
+        let mut sorted_beta = beta.to_vec();
+        sorted_alpha.sort_unstable();
+        sorted_beta.sort_unstable();
+    
+        // Partition into matching and differing indices
+        let mut common_alpha = Vec::new();  // For matching alpha indices
+        let mut common_beta = Vec::new();   // For matching beta indices
+        let mut alpha_extra = Vec::new();   // For extra alpha indices
+        let mut beta_extra = Vec::new();    // For extra beta indices
+    
+        let mut i = 0;
+        let mut j = 0;
+    
+        // Finding matching and extra indices
+        while i < sorted_alpha.len() && j < sorted_beta.len() {
+            match sorted_alpha[i].cmp(&sorted_beta[j]) {
+                Ordering::Equal => {
+                    common_alpha.push(sorted_alpha[i]);
+                    common_beta.push(sorted_beta[j]);
+                    i += 1;
+                    j += 1;
+                }
+                Ordering::Less => {
+                    alpha_extra.push(sorted_alpha[i]);
+                    i += 1;
+                }
+                Ordering::Greater => {
+                    beta_extra.push(sorted_beta[j]);
+                    j += 1;
+                }
+            }
+        }
+    
+        // Add remaining elements
+        while i < sorted_alpha.len() {
+            alpha_extra.push(sorted_alpha[i]);
+            i += 1;
+        }
+        while j < sorted_beta.len() {
+            beta_extra.push(sorted_beta[j]);
+            j += 1;
+        }
+    
+        // Handle the different cases
+        
+        self.update_witness_batch_equal(&common_alpha, gq, &common_beta, value);
+        
+        self.update_witnesses_batch_different(&common_alpha, gq, &beta_extra, value);
+        
+        self.update_witnesses_batch_different(&alpha_extra, gq, beta, value);
+            
+    }
+
+    
+    pub fn update_witness_batch_equal(
+        &self,
+        alpha: &[usize],
+        gq: &[G1],
+        beta: &[usize],
+        value: &[Fr],
+    ) -> () {
+        println!("Equal");
+
     }
 
     /// Update witnesses given updates (\alpha, \beta)
@@ -328,5 +404,14 @@ mod tests {
         let index = [0, 1, 2, 3, 4, 5, 6];
         let gqq = vc_c.aggregate_proof(&index, &gq[0..=6]);
         assert!(vc_c.verify_multi(&vc_p, gc, &index, &v[0..=6], gqq));
+    }
+
+    //Test for update_witness_batch
+    #[test]
+    fn test_update_witness_batchpub() {
+        
+
+        // Further assertions can be added depending on the behavior you want to test
+        // such as checking which cases were executed, if the result is correct, etc.
     }
 }
