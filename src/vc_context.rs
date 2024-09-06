@@ -160,9 +160,9 @@ impl VcContext {
         gc + gl[index] * (value * unity[index * step] / nf)
     }
 
-    /// Update witnesses given updates (\alpha, \beta)
-    /// elements in \alpha must be different from index
-    /// Test TBD
+    /// Update witnesses `gq` with index array `alpha`
+    /// given updates on index `beta` and delta value `value`
+    /// elements in `beta` must be different from `alpha`
     pub fn update_witnesses_batch_different(
         &self,
         alpha: &[usize],
@@ -175,7 +175,8 @@ impl VcContext {
 
         let walpha = alpha.iter().map(|i| unity[*i]).collect::<Vec<Fr>>();
         let wbeta = beta.iter().map(|i| unity[*i]).collect::<Vec<Fr>>();
-        let z = poly_zero(unity, &walpha);
+
+        let z = poly_zero(unity, &wbeta);
 
         let zz = z
             .iter()
@@ -184,29 +185,30 @@ impl VcContext {
             .map(|(i, x)| x * &Fr::from((i + 1) as u32))
             .collect::<Vec<Fr>>();
 
-        let zwindex = poly_evaluate(unity, &z, &wbeta);
-        let zzwalpha = poly_evaluate(unity, &zz, &walpha);
+        let zwalpha = poly_evaluate(unity, &z, &walpha);
+        let zzwbeta = poly_evaluate(unity, &zz, &wbeta);
 
         let ya: Vec<Fr> = value
             .iter()
-            .zip(walpha.iter().zip(zzwalpha.iter()))
+            .zip(wbeta.iter().zip(zzwbeta.iter()))
             .map(|(v, (u, a))| v * u / nf * a)
             .collect();
         let yb: Vec<G1> = ya
             .iter()
             .enumerate()
-            .map(|(i, v)| self.gl[alpha[i]] * v)
+            .map(|(i, v)| self.gl[beta[i]] * v)
             .collect();
-        let ha = poly_interpolate(&self.unity, &walpha, &ya);
-        let hb = poly_interpolate(&self.unity, &walpha, &yb);
 
-        let evala = poly_evaluate(&self.unity, &ha, &wbeta);
-        let evalb = poly_evaluate(&self.unity, &hb, &wbeta);
+        let ha = poly_interpolate(&self.unity, &wbeta, &ya);
+        let hb = poly_interpolate(&self.unity, &wbeta, &yb);
 
-        let lindex = beta.iter().map(|i| self.gl[*i]);
+        let evala = poly_evaluate(&self.unity, &ha, &walpha);
+        let evalb = poly_evaluate(&self.unity, &hb, &walpha);
+
+        let lindex = alpha.iter().map(|i| self.gl[*i]);
         gq.iter()
             .zip(evala.iter().zip(evalb.iter()))
-            .zip(zwindex.iter().zip(lindex))
+            .zip(zwalpha.iter().zip(lindex))
             .map(|((g, (a, b)), (z, l))| g + l * (a / z) - *b * (Fr::ONE / z))
             .collect()
     }
@@ -328,5 +330,33 @@ mod tests {
         let index = [0, 1, 2, 3, 4, 5, 6];
         let gqq = vc_c.aggregate_proof(&index, &gq[0..=6]);
         assert!(vc_c.verify_multi(&vc_p, gc, &index, &v[0..=6], gqq));
+    }
+
+    #[test]
+    fn test_update_witnesses_batch_different() {
+        let (_s, vc_p) = test_parameter();
+        let vc_c = VcContext::new(&vc_p, vc_p.logn);
+        let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
+        let vd = [11, 4, 25, 2, 3, 6, 7, 0].map(Fr::from);
+
+        let (gc, gq) = vc_c.build_commitment(&v);
+        let (gcd, _gqd) = vc_c.build_commitment(&vd);
+
+        // Set up the indices for alpha and beta
+        let alpha = [1, 3, 5];
+        let beta = [0, 2];
+        let gq = [gq[1], gq[3], gq[5]];
+        let delta_value = [Fr::from(10), Fr::from(20)];
+
+        // Update witnesses using batch different update
+        let updated_gq = vc_c.update_witnesses_batch_different(&alpha, &gq, &beta, &delta_value);
+        let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
+        let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
+
+        assert!(gc == gcd);
+        // Verify that the updated witnesses are correct
+        for i in 0..alpha.len() {
+            assert!(vc_c.verify(&vc_p, gc, alpha[i], v[alpha[i]], updated_gq[i]));
+        }
     }
 }
