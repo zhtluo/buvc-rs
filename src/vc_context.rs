@@ -161,7 +161,7 @@ impl VcContext {
         gc + gl[index] * (value * unity[index * step] / nf)
     }
 
-    pub fn update_witness_batchpub(
+    pub fn update_witness_batch(
         &self,
         alpha: &[usize], // Indices of the proofs
         gq: &[G1],       // The G1 elements corresponding to the proofs
@@ -177,7 +177,6 @@ impl VcContext {
     
         // Partition into matching and differing indices
         let mut common_alpha = Vec::new();  // For matching alpha indices
-        let mut common_beta = Vec::new();   // For matching beta indices
         let mut alpha_extra = Vec::new();   // For extra alpha indices
         let mut beta_extra = Vec::new();    // For extra beta indices
     
@@ -189,7 +188,6 @@ impl VcContext {
             match sorted_alpha[i].cmp(&sorted_beta[j]) {
                 Ordering::Equal => {
                     common_alpha.push(sorted_alpha[i]);
-                    common_beta.push(sorted_beta[j]);
                     i += 1;
                     j += 1;
                 }
@@ -215,26 +213,42 @@ impl VcContext {
         }
     
         // Handle the different cases
+        if  common_alpha.len() > 0 {
+            self.update_witness_batch_same(&common_alpha, gq, value);
+        }
         
-        self.update_witness_batch_equal(&common_alpha, gq, &common_beta, value);
-        
-        self.update_witnesses_batch_different(&common_alpha, gq, &beta_extra, value);
-        
-        self.update_witnesses_batch_different(&alpha_extra, gq, beta, value);
-            
+        if common_alpha.len() > 0 && beta_extra.len() > 0 {
+        self.update_witnesses_batch_different_test(&common_alpha, gq, &beta_extra, value);
+        }
+
+        if alpha_extra.len() > 0 && beta.len() > 0 {
+            self.update_witnesses_batch_different_test(&alpha_extra, gq, beta, value);
+        }
     }
 
     
-    pub fn update_witness_batch_equal(
+    pub fn update_witness_batch_same(
         &self,
         alpha: &[usize],
-        gq: &[G1],
-        beta: &[usize],
-        value: &[Fr],
+        _gq: &[G1],
+        _value: &[Fr],
     ) -> () {
         println!("Equal");
-
+        println!("Alpha: {:?}", alpha);
     }
+
+    pub fn update_witnesses_batch_different_test(
+        &self,
+        alpha: &[usize],
+        _gq: &[G1],
+        beta: &[usize],
+        _value: &[Fr],
+    ) -> () {
+        println!("Different");
+        println!("Alpha: {:?}", alpha);
+        println!("Beta: {:?}", beta);
+    }
+
 
     /// Update witnesses `gq` with index array `alpha`
     /// given updates on index `beta` and delta value `value`
@@ -410,11 +424,24 @@ mod tests {
 
     //Test for update_witness_batch
     #[test]
-    fn test_update_witness_batchpub() {
-        
-
+    fn test_update_witness_batch() {
         // Further assertions can be added depending on the behavior you want to test
         // such as checking which cases were executed, if the result is correct, etc.
+        let (_s, vc_p) = test_parameter();
+        let vc_c = VcContext::new(&vc_p, vc_p.logn);
+
+        let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
+        let vd = [11, 4, 25, 2, 3, 6, 7, 0].map(Fr::from);
+
+        let (_gc, gq) = vc_c.build_commitment(&v);
+        let (_gcd, _gqd) = vc_c.build_commitment(&vd);
+
+        // Set up the indices for alpha and beta
+        let alpha = [1, 2, 3, 4, 5];
+        let beta = [1, 5, 0, 2];
+
+        // Update witnesses using batch update
+        vc_c.update_witness_batch(&alpha, &gq, &beta, &vd);
     }
     
     #[test]
