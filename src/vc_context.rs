@@ -1,5 +1,4 @@
 use std::iter;
-use std::cmp::Ordering; // Import Ordering for comparison
 
 use ark_bls12_381::fr::Fr;
 use ark_bls12_381::Bls12_381;
@@ -167,15 +166,13 @@ impl VcContext {
         gq: &[G1],       // The G1 elements corresponding to the proofs
         beta: &[usize],  // Indices of the modifications
         value: &[Fr],    // The Fr elements corresponding to the modifications
-    ) -> () {
-    
-        // Sorting the indices if necessary
+    ) {
+        // Always sorting alpha and beta at the beginning
         let mut sorted_alpha = alpha.to_vec();
         let mut sorted_beta = beta.to_vec();
         sorted_alpha.sort_unstable();
         sorted_beta.sort_unstable();
     
-        // Partition into matching and differing indices
         let mut common_alpha = Vec::new();  // For matching alpha indices
         let mut alpha_extra = Vec::new();   // For extra alpha indices
         let mut beta_extra = Vec::new();    // For extra beta indices
@@ -183,46 +180,40 @@ impl VcContext {
         let mut i = 0;
         let mut j = 0;
     
-        // Finding matching and extra indices
+        // Optimized loop for partitioning alpha and beta
         while i < sorted_alpha.len() && j < sorted_beta.len() {
-            match sorted_alpha[i].cmp(&sorted_beta[j]) {
-                Ordering::Equal => {
-                    common_alpha.push(sorted_alpha[i]);
-                    i += 1;
-                    j += 1;
-                }
-                Ordering::Less => {
-                    alpha_extra.push(sorted_alpha[i]);
-                    i += 1;
-                }
-                Ordering::Greater => {
-                    beta_extra.push(sorted_beta[j]);
-                    j += 1;
-                }
+            if sorted_alpha[i] == sorted_beta[j] {
+                common_alpha.push(sorted_alpha[i]);
+                i += 1;
+                j += 1;
+            } else if sorted_alpha[i] < sorted_beta[j] {
+                alpha_extra.push(sorted_alpha[i]);
+                i += 1;
+            } else {
+                beta_extra.push(sorted_beta[j]);
+                j += 1;
             }
         }
     
-        // Add remaining elements
-        while i < sorted_alpha.len() {
-            alpha_extra.push(sorted_alpha[i]);
-            i += 1;
+        // Add remaining elements from `alpha` and `beta`
+        if i < sorted_alpha.len() {
+            alpha_extra.extend_from_slice(&sorted_alpha[i..]);
         }
-        while j < sorted_beta.len() {
-            beta_extra.push(sorted_beta[j]);
-            j += 1;
+        if j < sorted_beta.len() {
+            beta_extra.extend_from_slice(&sorted_beta[j..]);
         }
     
-        // Handle the different cases
-        if  common_alpha.len() > 0 {
+        // Handle the different cases with function calls
+        if !common_alpha.is_empty() {
             self.update_witness_batch_same(&common_alpha, gq, value);
         }
         
-        if common_alpha.len() > 0 && beta_extra.len() > 0 {
-        self.update_witnesses_batch_different_test(&common_alpha, gq, &beta_extra, value);
+        if !common_alpha.is_empty() && !beta_extra.is_empty() {
+            self.update_witnesses_batch_different_test(&common_alpha, gq, &beta_extra, value);
         }
-
-        if alpha_extra.len() > 0 && beta.len() > 0 {
-            self.update_witnesses_batch_different_test(&alpha_extra, gq, beta, value);
+    
+        if !alpha_extra.is_empty() && !sorted_beta.is_empty() {
+            self.update_witnesses_batch_different_test(&alpha_extra, gq, &sorted_beta, value);
         }
     }
 
