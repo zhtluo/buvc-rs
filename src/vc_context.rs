@@ -209,11 +209,11 @@ impl VcContext {
         }
         
         if !common_alpha.is_empty() && !beta_extra.is_empty() {
-            self.update_witnesses_batch_different_test(&common_alpha, gq, &beta_extra, value);
+            self.update_witnesses_batch_different(&common_alpha, gq, &beta_extra, value);
         }
     
         if !alpha_extra.is_empty() && !sorted_beta.is_empty() {
-            self.update_witnesses_batch_different_test(&alpha_extra, gq, &sorted_beta, value);
+            self.update_witnesses_batch_different(&alpha_extra, gq, &sorted_beta, value);
         }
     }
 
@@ -224,8 +224,7 @@ impl VcContext {
         _gq: &[G1],
         _value: &[Fr],
     ) -> () {
-        println!("Equal");
-        println!("Alpha: {:?}", alpha);
+       
     }
 
     pub fn update_witnesses_batch_different_test(
@@ -235,9 +234,6 @@ impl VcContext {
         beta: &[usize],
         _value: &[Fr],
     ) -> () {
-        println!("Different");
-        println!("Alpha: {:?}", alpha);
-        println!("Beta: {:?}", beta);
     }
 
 
