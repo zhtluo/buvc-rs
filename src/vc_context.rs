@@ -226,17 +226,6 @@ impl VcContext {
     ) -> () {
        
     }
-
-    pub fn update_witnesses_batch_different_test(
-        &self,
-        alpha: &[usize],
-        _gq: &[G1],
-        beta: &[usize],
-        _value: &[Fr],
-    ) -> () {
-    }
-
-
     /// Update witnesses `gq` with index array `alpha`
     /// given updates on index `beta` and delta value `value`
     /// elements in `beta` must be different from `alpha`
