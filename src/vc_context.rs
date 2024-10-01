@@ -221,11 +221,108 @@ impl VcContext {
     pub fn update_witness_batch_same(
         &self,
         alpha: &[usize],
-        _gq: &[G1],
-        _value: &[Fr],
-    ) -> () {
-       
+        gq: &[G1],
+        value: &[Fr],
+    ) -> Vec<G1> {
+        let nf = &self.nf;
+        let unity = &self.unity;
+
+        //Compute coefficients of zeroing polynomial
+        let walpha = alpha.iter().map(|i| unity[*i]).collect::<Vec<Fr>>();
+        let g = poly_zero(unity, &walpha);
+
+        //The derivative of the zeroing polynomial
+        let g_prime = g
+            .iter()
+            .skip(1)
+            .enumerate()
+            .map(|(i, x)| x * &Fr::from((i + 1) as u32))
+            .collect::<Vec<Fr>>();
+
+        //Derivative of the derivative of the zeroing polynomial
+        let g_double_prime = g_prime
+            .iter()
+            .skip(1)
+            .enumerate()
+            .map(|(i, x)| x * &Fr::from((i + 1) as u32))
+            .collect::<Vec<Fr>>();
+
+        // Evaluate g' and g'' at the alpha points
+        let g_prime_walpha = poly_evaluate(unity, &g_prime, &walpha);
+        let g_double_prime_walpha = poly_evaluate(unity, &g_double_prime, &walpha);
+
+        //Compute ya and yb with the first derivative of the zeroing polynomial
+        let y_g_prime_a: Vec<Fr> = value
+            .iter()
+            .zip(walpha.iter().zip(g_prime_walpha.iter()))
+            .map(|(v, (u, a))| v * u / nf * a)
+            .collect();
+
+        let y_g_prime_b: Vec<G1> = y_g_prime_a
+            .iter()
+            .enumerate()
+            .map(|(i, v)| self.gl[alpha[i]] * v)
+            .collect();
+
+        //Compute ya and yb with the second derivative of the zeroing polynomial
+        let y_g_double_prime_a: Vec<Fr> = value
+            .iter()
+            .zip(walpha.iter().zip(g_double_prime_walpha.iter()))
+            .map(|(v, (u, a))| v * u / nf * a)
+            .collect();
+
+        let y_g_double_prime_b: Vec<G1> = y_g_double_prime_a
+            .iter()
+            .enumerate()
+            .map(|(i, v)| self.gl[alpha[i]] * v)
+            .collect();
+
+
+        //Interpolate the polynomial to get ha and hb
+        let h_a = poly_interpolate(&self.unity, &walpha, &y_g_prime_a);
+        let h_b = poly_interpolate(&self.unity, &walpha, &y_g_prime_b);
+
+        //Derivative of polinomial ha and hb
+        let h_a_prime: Vec<Fr> = h_a
+            .iter()
+            .skip(1)
+            .enumerate()
+            .map(|(i, x)| x * &Fr::from((i + 1) as u32))
+            .collect::<Vec<Fr>>();
+
+        let h_b_prime: Vec<G1> = h_b
+            .iter()
+            .skip(1) 
+            .enumerate()
+            .map(|(i, x)| *x * &Fr::from((i + 1) as u32))
+            .collect();
+        
+        //Compute coefficients of the derivate of ha and hb
+        let eval_ha_prime = poly_evaluate(&self.unity, &h_a_prime, &walpha);
+        let eval_hb_prime = poly_evaluate(&self.unity, &h_b_prime, &walpha);
+
+        //Compute the first term of the update
+        let a_numerator: Vec<Fr> = eval_ha_prime
+        .iter()
+        .zip(y_g_double_prime_a.iter())
+        .map(|(ha, y)| *ha - (*y / Fr::from(2u32))) 
+        .collect();
+
+        let b_numerator: Vec<G1> = eval_hb_prime
+        .iter()
+        .zip(y_g_double_prime_b.iter())
+        .map(|(hb, yb)| hb - (*yb *(Fr::ONE/ Fr::from(2u32)))) 
+        .collect();
+        
+        // Collect lindex into a Vec<G1>
+        let lindex = alpha.iter().map(|i| self.gl[*i]);    
+        gq.iter()
+            .zip(a_numerator.iter().zip(b_numerator.iter()))
+            .zip(g_prime_walpha.iter().zip(lindex))
+            .map(|((g, (a, b)), (z, l))| g + l * (a / z) - *b * (Fr::ONE / z))
+            .collect()
     }
+
     /// Update witnesses `gq` with index array `alpha`
     /// given updates on index `beta` and delta value `value`
     /// elements in `beta` must be different from `alpha`
@@ -418,6 +515,36 @@ mod tests {
 
         // Update witnesses using batch update
         vc_c.update_witness_batch(&alpha, &gq, &beta, &vd);
+    }
+
+    //Test for update_witness_batch_same
+    #[test]
+    fn test_update_witness_batch_same() {
+        let (_s, vc_p) = test_parameter();
+        let vc_c = VcContext::new(&vc_p, vc_p.logn);
+        let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
+        let vd = [11, 4, 25, 2, 3, 6, 7, 0].map(Fr::from);
+
+        let (gc, gq) = vc_c.build_commitment(&v);
+        let (gcd, _gqd) = vc_c.build_commitment(&vd);
+
+        // Set up the indices for alpha and beta
+        let alpha = [1, 3, 5];
+        let beta = [1, 3, 5];
+        let gq = [gq[1], gq[3], gq[5]];
+        let delta_value = [Fr::from(10), Fr::from(20), Fr::from(30)];
+
+        // Update witnesses using batch same update
+        let updated_gq = vc_c.update_witness_batch_same(&alpha, &gq, &delta_value);
+        let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
+        let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
+        let gc = vc_c.update_commitment(gc, beta[2], delta_value[2]);
+    
+        assert!(gc == gcd);
+        // Verify that the updated witnesses are correct
+        for i in 0..alpha.len() {
+            assert!(vc_c.verify(&vc_p, gc, alpha[i], v[alpha[i]], updated_gq[i]));
+        }
     }
     
     #[test]
