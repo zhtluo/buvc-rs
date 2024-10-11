@@ -166,7 +166,7 @@ impl VcContext {
         gq: &[G1],       // The G1 elements corresponding to the proofs
         beta: &[usize],  // Indices of the modifications
         value: &[Fr],    // The Fr elements corresponding to the modifications
-    ) {
+    )  -> Vec<G1> {
         // Always sorting alpha and beta at the beginning
         let mut sorted_alpha = alpha.to_vec();
         let mut sorted_beta = beta.to_vec();
@@ -202,19 +202,22 @@ impl VcContext {
         if j < sorted_beta.len() {
             beta_extra.extend_from_slice(&sorted_beta[j..]);
         }
-    
-        // Handle the different cases with function calls
+
+        let result = Vec::new();
+
         if !common_alpha.is_empty() {
             self.update_witness_batch_same(&common_alpha, gq, value);
         }
-        
+
         if !common_alpha.is_empty() && !beta_extra.is_empty() {
             self.update_witnesses_batch_different(&common_alpha, gq, &beta_extra, value);
         }
-    
+
         if !alpha_extra.is_empty() && !sorted_beta.is_empty() {
             self.update_witnesses_batch_different(&alpha_extra, gq, &sorted_beta, value);
         }
+
+        result
     }
 
     
@@ -224,6 +227,7 @@ impl VcContext {
         gq: &[G1],
         value: &[Fr],
     ) -> Vec<G1> {
+
         let nf = &self.nf;
         let unity = &self.unity;
 
@@ -301,7 +305,7 @@ impl VcContext {
         let eval_ha_prime = poly_evaluate(&self.unity, &h_a_prime, &walpha);
         let eval_hb_prime = poly_evaluate(&self.unity, &h_b_prime, &walpha);
 
-        //Compute the first term of the update
+        //Compute the first terms of the update
         let a_numerator: Vec<Fr> = eval_ha_prime
         .iter()
         .zip(y_g_double_prime_a.iter())
@@ -316,10 +320,16 @@ impl VcContext {
         
         // Collect lindex into a Vec<G1>
         let lindex = alpha.iter().map(|i| self.gl[*i]);    
-        gq.iter()
+        let nq: Vec<G1> = gq.iter()
             .zip(a_numerator.iter().zip(b_numerator.iter()))
             .zip(g_prime_walpha.iter().zip(lindex))
             .map(|((g, (a, b)), (z, l))| g + l * (a / z) - *b * (Fr::ONE / z))
+            .collect();
+
+        let llindex = alpha.iter().map(|i| self.gll[*i] * (unity[*i] / nf));
+        nq.iter()
+            .zip(llindex.zip(value.iter()))
+            .map(|(n, (l, v))| n + l * v)
             .collect()
     }
 
@@ -498,23 +508,31 @@ mod tests {
     //Test for update_witness_batch
     #[test]
     fn test_update_witness_batch() {
-        // Further assertions can be added depending on the behavior you want to test
-        // such as checking which cases were executed, if the result is correct, etc.
         let (_s, vc_p) = test_parameter();
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
-
         let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
-        let vd = [11, 4, 25, 2, 3, 6, 7, 0].map(Fr::from);
+        let vd = [11, 14, 5, 22, 3, 36, 7, 0].map(Fr::from);
 
-        let (_gc, gq) = vc_c.build_commitment(&v);
-        let (_gcd, _gqd) = vc_c.build_commitment(&vd);
+        let (gc, gq) = vc_c.build_commitment(&v);
+        let (gcd, _gqd) = vc_c.build_commitment(&vd);
 
         // Set up the indices for alpha and beta
-        let alpha = [1, 2, 3, 4, 5];
-        let beta = [1, 5, 0, 2];
+        let alpha = [1, 3, 5, 7];
+        let beta = [0, 3, 5, 4];
+        let gq = [gq[1], gq[3], gq[5]];
+        let delta_value = [Fr::from(10), Fr::from(20), Fr::from(30)];
 
-        // Update witnesses using batch update
-        vc_c.update_witness_batch(&alpha, &gq, &beta, &vd);
+        // Update witnesses using batch same update
+        let updated_gq = vc_c.update_witness_batch(&alpha, &gq, &beta, &delta_value);
+        let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
+        let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
+        let gc = vc_c.update_commitment(gc, beta[2], delta_value[2]);
+
+        assert!(gc == gcd);
+        // Verify that the updated witnesses are correct
+        for i in 0..alpha.len() {
+            assert!(vc_c.verify(&vc_p, gc, alpha[i], vd[alpha[i]], updated_gq[i]));
+        }
     }
 
     //Test for update_witness_batch_same
@@ -522,8 +540,8 @@ mod tests {
     fn test_update_witness_batch_same() {
         let (_s, vc_p) = test_parameter();
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
-        let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
-        let vd = [11, 4, 25, 2, 3, 6, 7, 0].map(Fr::from);
+        let v = [1, 4, 5, 2, 3, 6, 7, 8].map(Fr::from);
+        let vd = [1, 14, 5, 22, 3, 36, 7, 8].map(Fr::from);
 
         let (gc, gq) = vc_c.build_commitment(&v);
         let (gcd, _gqd) = vc_c.build_commitment(&vd);
@@ -539,11 +557,11 @@ mod tests {
         let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
         let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
         let gc = vc_c.update_commitment(gc, beta[2], delta_value[2]);
-    
+
         assert!(gc == gcd);
         // Verify that the updated witnesses are correct
         for i in 0..alpha.len() {
-            assert!(vc_c.verify(&vc_p, gc, alpha[i], v[alpha[i]], updated_gq[i]));
+            assert!(vc_c.verify(&vc_p, gc, alpha[i], vd[alpha[i]], updated_gq[i]));
         }
     }
     
