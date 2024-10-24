@@ -160,33 +160,35 @@ impl VcContext {
         gc + gl[index] * (value * unity[index * step] / nf)
     }
 
-    pub fn update_witness_batch(
+    pub fn update_witnesses_batch(
         &self,
         alpha: &[usize], // Indices of the proofs
         gq: &[G1],       // The G1 elements corresponding to the proofs
         beta: &[usize],  // Indices of the modifications
         value: &[Fr],    // The Fr elements corresponding to the modifications
-    )  -> Vec<G1> {
+    ) -> Vec<G1> {
         // Always sorting alpha and beta at the beginning
-        let mut sorted_alpha = alpha.to_vec();
-        let mut sorted_beta = beta.to_vec();
-        sorted_alpha.sort_unstable();
-        sorted_beta.sort_unstable();
-    
-        let mut common_alpha = Vec::new();  // For matching alpha indices
-        let mut alpha_extra = Vec::new();   // For extra alpha indices
-        let mut beta_extra = Vec::new();    // For extra beta indices
-    
+        let mut sorted_alpha: Vec<_> = alpha.iter().zip(0..alpha.len()).collect();
+        let mut sorted_beta: Vec<_> = beta.iter().zip(0..beta.len()).collect();
+        sorted_alpha.sort_by(|a, b| a.0.cmp(b.0));
+        sorted_beta.sort_by(|a, b| a.0.cmp(b.0));
+
+        let mut common_alpha = Vec::new(); // For matching alpha indices
+        let mut common_beta = Vec::new(); // For matching beta indices
+        let mut alpha_extra = Vec::new(); // For extra alpha indices
+        let mut beta_extra = Vec::new(); // For extra beta indices
+
         let mut i = 0;
         let mut j = 0;
-    
+
         // Optimized loop for partitioning alpha and beta
         while i < sorted_alpha.len() && j < sorted_beta.len() {
-            if sorted_alpha[i] == sorted_beta[j] {
+            if sorted_alpha[i].0 == sorted_beta[j].0 {
                 common_alpha.push(sorted_alpha[i]);
+                common_beta.push(sorted_beta[j]);
                 i += 1;
                 j += 1;
-            } else if sorted_alpha[i] < sorted_beta[j] {
+            } else if sorted_alpha[i].0 < sorted_beta[j].0 {
                 alpha_extra.push(sorted_alpha[i]);
                 i += 1;
             } else {
@@ -194,7 +196,7 @@ impl VcContext {
                 j += 1;
             }
         }
-    
+
         // Add remaining elements from `alpha` and `beta`
         if i < sorted_alpha.len() {
             alpha_extra.extend_from_slice(&sorted_alpha[i..]);
@@ -203,53 +205,67 @@ impl VcContext {
             beta_extra.extend_from_slice(&sorted_beta[j..]);
         }
 
-        // Step 3: Initialize the result vector
-        let mut result = vec![G1::default(); alpha.len()];
+        let mut result = gq.to_vec();
 
-        // Step 4: Update common indices between alpha and beta
-        let first_common_update = if !common_alpha.is_empty() {
-            self.update_witness_batch_same(&common_alpha, gq, value)
-        } else {
-            Vec::new()
-        };
-        
-        for (idx, res) in common_alpha.iter().zip(first_common_update.iter()) {
-            let alpha_idx = alpha.iter().position(|&x| x == *idx).unwrap();
-            result[alpha_idx] = *res;
+        if !common_alpha.is_empty() {
+            let m_alpha = common_alpha
+                .iter()
+                .map(|(x, _)| **x)
+                .collect::<Vec<usize>>();
+            let m_gq = common_alpha
+                .iter()
+                .map(|(_, y)| result[*y])
+                .collect::<Vec<G1>>();
+            let m_value = common_beta
+                .iter()
+                .map(|(_, x)| value[*x])
+                .collect::<Vec<Fr>>();
+            let updated_gq = self.update_witnesses_batch_same(&m_alpha, &m_gq, &m_value);
+            for i in common_alpha.iter().zip(updated_gq.iter()) {
+                result[i.0.1] = *i.1;
+            }
+            if !beta_extra.is_empty() {
+                let m_alpha = common_alpha
+                    .iter()
+                    .map(|(x, _)| **x)
+                    .collect::<Vec<usize>>();
+                let m_gq = common_alpha
+                    .iter()
+                    .map(|(_, y)| result[*y])
+                    .collect::<Vec<G1>>();
+                let m_beta = beta_extra.iter().map(|(x, _)| **x).collect::<Vec<usize>>();
+                let m_value = beta_extra
+                    .iter()
+                    .map(|(_, x)| value[*x])
+                    .collect::<Vec<Fr>>();
+                let updated_gq =
+                    self.update_witnesses_batch_different(&m_alpha, &m_gq, &m_beta, &m_value);
+                for i in common_alpha.iter().zip(updated_gq.iter()) {
+                    result[i.0.1] = *i.1;
+                }
+            }
         }
 
-        // Step 5: Update the remaining beta elements not in common
-        let second_common_update = if !common_alpha.is_empty() && !beta_extra.is_empty() {
-            self.update_witnesses_batch_different(&common_alpha, &first_common_update, &beta_extra, value)
-        } else {
-            Vec::new()
-        };
-
-        for (idx, res) in common_alpha.iter().zip(second_common_update.iter()) {
-            let alpha_idx = alpha.iter().position(|&x| x == *idx).unwrap();
-            result[alpha_idx] = *res;
-        }
-
-        // Step 6: Handle extra alpha elements with beta, using second_common_update
-        if !alpha_extra.is_empty() && !sorted_beta.is_empty() {
-            let extra_updates = self.update_witnesses_batch_different(&alpha_extra, gq, &sorted_beta, value);
-            for (idx, res) in alpha_extra.iter().zip(extra_updates) {
-                let alpha_idx = alpha.iter().position(|&x| x == *idx).unwrap();
-                result[alpha_idx] = res;
+        if !alpha_extra.is_empty() {
+            let m_alpha = alpha_extra.iter().map(|(x, _)| **x).collect::<Vec<usize>>();
+            let m_gq = alpha_extra
+                .iter()
+                .map(|(_, y)| result[*y])
+                .collect::<Vec<G1>>();
+            let m_beta = beta;
+            let m_value = value;
+            let updated_gq =
+                self.update_witnesses_batch_different(&m_alpha, &m_gq, m_beta, m_value);
+            for i in alpha_extra.iter().zip(updated_gq.iter()) {
+                result[i.0.1] = *i.1;
             }
         }
 
         // Return the final result vector after all updates
         result
     }
-    
-    pub fn update_witness_batch_same(
-        &self,
-        alpha: &[usize],
-        gq: &[G1],
-        value: &[Fr],
-    ) -> Vec<G1> {
 
+    pub fn update_witnesses_batch_same(&self, alpha: &[usize], gq: &[G1], value: &[Fr]) -> Vec<G1> {
         let nf = &self.nf;
         let unity = &self.unity;
 
@@ -303,7 +319,6 @@ impl VcContext {
             .map(|(i, v)| self.gl[alpha[i]] * v)
             .collect();
 
-
         //Interpolate the polynomial to get ha and hb
         let h_a = poly_interpolate(&self.unity, &walpha, &y_g_prime_a);
         let h_b = poly_interpolate(&self.unity, &walpha, &y_g_prime_b);
@@ -318,31 +333,32 @@ impl VcContext {
 
         let h_b_prime: Vec<G1> = h_b
             .iter()
-            .skip(1) 
+            .skip(1)
             .enumerate()
-            .map(|(i, x)| *x * &Fr::from((i + 1) as u32))
+            .map(|(i, x)| *x * Fr::from((i + 1) as u32))
             .collect();
-        
+
         //Compute coefficients of the derivate of ha and hb
         let eval_ha_prime = poly_evaluate(&self.unity, &h_a_prime, &walpha);
         let eval_hb_prime = poly_evaluate(&self.unity, &h_b_prime, &walpha);
 
         //Compute the first terms of the update
         let a_numerator: Vec<Fr> = eval_ha_prime
-        .iter()
-        .zip(y_g_double_prime_a.iter())
-        .map(|(ha, y)| *ha - (*y / Fr::from(2u32))) 
-        .collect();
+            .iter()
+            .zip(y_g_double_prime_a.iter())
+            .map(|(ha, y)| *ha - (*y / Fr::from(2u32)))
+            .collect();
 
         let b_numerator: Vec<G1> = eval_hb_prime
-        .iter()
-        .zip(y_g_double_prime_b.iter())
-        .map(|(hb, yb)| hb - (*yb *(Fr::ONE/ Fr::from(2u32)))) 
-        .collect();
-        
+            .iter()
+            .zip(y_g_double_prime_b.iter())
+            .map(|(hb, yb)| hb - (*yb * (Fr::ONE / Fr::from(2u32))))
+            .collect();
+
         // Collect lindex into a Vec<G1>
-        let lindex = alpha.iter().map(|i| self.gl[*i]);    
-        let nq: Vec<G1> = gq.iter()
+        let lindex = alpha.iter().map(|i| self.gl[*i]);
+        let nq: Vec<G1> = gq
+            .iter()
             .zip(a_numerator.iter().zip(b_numerator.iter()))
             .zip(g_prime_walpha.iter().zip(lindex))
             .map(|((g, (a, b)), (z, l))| g + l * (a / z) - *b * (Fr::ONE / z))
@@ -532,28 +548,28 @@ mod tests {
     fn test_update_witness_batch() {
         let (_s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
-    
+
         let v = [1, 4, 5, 2, 3, 6, 7, 8].map(Fr::from); // Original values
         let vd = [11, 4, 25, 22, 3, 36, 7, 8].map(Fr::from); // Updated values
-    
+
         let (gc, gq) = vc_c.build_commitment(&v);
         let (gcd, _gqd) = vc_c.build_commitment(&vd);
-    
+
         let alpha = [1, 3, 5, 7];
-        let beta = [0, 3, 5, 2];
-    
+        let beta = [0, 2, 3, 5];
+
         let gq = [gq[1], gq[3], gq[5], gq[7]];
-        let delta_value = [Fr::from(10), Fr::from(20), Fr::from(30), Fr::from(40)];
-    
-        let updated_gq = vc_c.update_witness_batch(&alpha, &gq, &beta, &delta_value);
-    
+        let delta_value = [Fr::from(10), Fr::from(20), Fr::from(20), Fr::from(30)];
+
+        let updated_gq = vc_c.update_witnesses_batch(&alpha, &gq, &beta, &delta_value);
+
         let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
         let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
         let gc = vc_c.update_commitment(gc, beta[2], delta_value[2]);
         let gc = vc_c.update_commitment(gc, beta[3], delta_value[3]);
 
         assert!(gc == gcd);
-    
+
         for i in 0..alpha.len() {
             assert!(vc_c.verify(&vc_p, gc, alpha[i], vd[alpha[i]], updated_gq[i]));
         }
@@ -577,7 +593,7 @@ mod tests {
         let delta_value = [Fr::from(10), Fr::from(20), Fr::from(30), Fr::from(40)];
 
         // Update witnesses using batch same update
-        let updated_gq = vc_c.update_witness_batch_same(&alpha, &gq, &delta_value);
+        let updated_gq = vc_c.update_witnesses_batch(&alpha, &gq, &alpha, &delta_value);
         let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
         let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
         let gc = vc_c.update_commitment(gc, beta[2], delta_value[2]);
@@ -589,7 +605,7 @@ mod tests {
             assert!(vc_c.verify(&vc_p, gc, alpha[i], vd[alpha[i]], updated_gq[i]));
         }
     }
-    
+
     #[test]
     fn test_update_witnesses_batch_different() {
         let (_s, vc_p) = test_parameter(3);
@@ -607,7 +623,7 @@ mod tests {
         let delta_value = [Fr::from(10), Fr::from(20)];
 
         // Update witnesses using batch different update
-        let updated_gq = vc_c.update_witnesses_batch_different(&alpha, &gq, &beta, &delta_value);
+        let updated_gq = vc_c.update_witnesses_batch(&alpha, &gq, &beta, &delta_value);
         let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
         let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
 
