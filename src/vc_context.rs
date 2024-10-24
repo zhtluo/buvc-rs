@@ -203,23 +203,45 @@ impl VcContext {
             beta_extra.extend_from_slice(&sorted_beta[j..]);
         }
 
-        let result = Vec::new();
+        // Step 3: Initialize the result vector
+        let mut result = vec![G1::default(); alpha.len()];
 
-        if !common_alpha.is_empty() {
-            self.update_witness_batch_same(&common_alpha, gq, value);
+        // Step 4: Update common indices between alpha and beta
+        let first_common_update = if !common_alpha.is_empty() {
+            self.update_witness_batch_same(&common_alpha, gq, value)
+        } else {
+            Vec::new()
+        };
+        
+        for (idx, res) in common_alpha.iter().zip(first_common_update.iter()) {
+            let alpha_idx = alpha.iter().position(|&x| x == *idx).unwrap();
+            result[alpha_idx] = *res;
         }
 
-        if !common_alpha.is_empty() && !beta_extra.is_empty() {
-            self.update_witnesses_batch_different(&common_alpha, gq, &beta_extra, value);
+        // Step 5: Update the remaining beta elements not in common
+        let second_common_update = if !common_alpha.is_empty() && !beta_extra.is_empty() {
+            self.update_witnesses_batch_different(&common_alpha, &first_common_update, &beta_extra, value)
+        } else {
+            Vec::new()
+        };
+
+        for (idx, res) in common_alpha.iter().zip(second_common_update.iter()) {
+            let alpha_idx = alpha.iter().position(|&x| x == *idx).unwrap();
+            result[alpha_idx] = *res;
         }
 
+        // Step 6: Handle extra alpha elements with beta, using second_common_update
         if !alpha_extra.is_empty() && !sorted_beta.is_empty() {
-            self.update_witnesses_batch_different(&alpha_extra, gq, &sorted_beta, value);
+            let extra_updates = self.update_witnesses_batch_different(&alpha_extra, gq, &sorted_beta, value);
+            for (idx, res) in alpha_extra.iter().zip(extra_updates) {
+                let alpha_idx = alpha.iter().position(|&x| x == *idx).unwrap();
+                result[alpha_idx] = res;
+            }
         }
 
+        // Return the final result vector after all updates
         result
     }
-
     
     pub fn update_witness_batch_same(
         &self,
@@ -406,7 +428,7 @@ mod tests {
 
     #[test]
     fn test_vc_context_new() {
-        let (_s, vc_p) = test_parameter();
+        let (_s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
 
         let n = vc_c.n;
@@ -441,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_vc_context_commitment() {
-        let (s, vc_p) = test_parameter();
+        let (s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, 1);
         let n = vc_c.n;
         let v = [0, 1].map(Fr::from);
@@ -464,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_vc_context_verify() {
-        let (_s, vc_p) = test_parameter();
+        let (_s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
         let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
 
@@ -480,7 +502,7 @@ mod tests {
 
     #[test]
     fn test_vc_context_verify_multi() {
-        let (_s, vc_p) = test_parameter();
+        let (_s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
         let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
 
@@ -508,28 +530,30 @@ mod tests {
     //Test for update_witness_batch
     #[test]
     fn test_update_witness_batch() {
-        let (_s, vc_p) = test_parameter();
+        let (_s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
-        let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
-        let vd = [11, 14, 5, 22, 3, 36, 7, 0].map(Fr::from);
-
+    
+        let v = [1, 4, 5, 2, 3, 6, 7, 8].map(Fr::from); // Original values
+        let vd = [11, 4, 25, 22, 3, 36, 7, 8].map(Fr::from); // Updated values
+    
         let (gc, gq) = vc_c.build_commitment(&v);
         let (gcd, _gqd) = vc_c.build_commitment(&vd);
-
-        // Set up the indices for alpha and beta
+    
         let alpha = [1, 3, 5, 7];
-        let beta = [0, 3, 5, 4];
-        let gq = [gq[1], gq[3], gq[5]];
-        let delta_value = [Fr::from(10), Fr::from(20), Fr::from(30)];
-
-        // Update witnesses using batch same update
+        let beta = [0, 3, 5, 2];
+    
+        let gq = [gq[1], gq[3], gq[5], gq[7]];
+        let delta_value = [Fr::from(10), Fr::from(20), Fr::from(30), Fr::from(40)];
+    
         let updated_gq = vc_c.update_witness_batch(&alpha, &gq, &beta, &delta_value);
+    
         let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
         let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
         let gc = vc_c.update_commitment(gc, beta[2], delta_value[2]);
+        let gc = vc_c.update_commitment(gc, beta[3], delta_value[3]);
 
         assert!(gc == gcd);
-        // Verify that the updated witnesses are correct
+    
         for i in 0..alpha.len() {
             assert!(vc_c.verify(&vc_p, gc, alpha[i], vd[alpha[i]], updated_gq[i]));
         }
@@ -538,25 +562,26 @@ mod tests {
     //Test for update_witness_batch_same
     #[test]
     fn test_update_witness_batch_same() {
-        let (_s, vc_p) = test_parameter();
+        let (_s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
         let v = [1, 4, 5, 2, 3, 6, 7, 8].map(Fr::from);
-        let vd = [1, 14, 5, 22, 3, 36, 7, 8].map(Fr::from);
+        let vd = [1, 14, 5, 22, 3, 36, 7, 48].map(Fr::from);
 
         let (gc, gq) = vc_c.build_commitment(&v);
         let (gcd, _gqd) = vc_c.build_commitment(&vd);
 
         // Set up the indices for alpha and beta
-        let alpha = [1, 3, 5];
-        let beta = [1, 3, 5];
-        let gq = [gq[1], gq[3], gq[5]];
-        let delta_value = [Fr::from(10), Fr::from(20), Fr::from(30)];
+        let alpha = [1, 3, 5, 7];
+        let beta = [1, 3, 5, 7];
+        let gq = [gq[1], gq[3], gq[5], gq[7]];
+        let delta_value = [Fr::from(10), Fr::from(20), Fr::from(30), Fr::from(40)];
 
         // Update witnesses using batch same update
         let updated_gq = vc_c.update_witness_batch_same(&alpha, &gq, &delta_value);
         let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
         let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
         let gc = vc_c.update_commitment(gc, beta[2], delta_value[2]);
+        let gc = vc_c.update_commitment(gc, beta[3], delta_value[3]);
 
         assert!(gc == gcd);
         // Verify that the updated witnesses are correct
@@ -567,7 +592,7 @@ mod tests {
     
     #[test]
     fn test_update_witnesses_batch_different() {
-        let (_s, vc_p) = test_parameter();
+        let (_s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
         let v = [1, 4, 5, 2, 3, 6, 7, 0].map(Fr::from);
         let vd = [11, 4, 25, 2, 3, 6, 7, 0].map(Fr::from);
