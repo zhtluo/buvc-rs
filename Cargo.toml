@@ -16,3 +16,9 @@ log = { version = "0.4.21" }
 [dev-dependencies]
 clap = "4.5.4"
 env_logger = "0.11.3"
+criterion = { version = "0.5", features = ["html_reports"] }
+plotters = "0.3"
+
+[[bench]]
+name = "my_benchmark"
+harness = false

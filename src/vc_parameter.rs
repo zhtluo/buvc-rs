@@ -33,12 +33,12 @@ impl VcParameter {
     }
 }
 
-#[cfg(test)]
+//#[cfg(test)]
 pub mod tests {
     use super::*;
 
-    pub fn test_parameter() -> (Fr, VcParameter) {
+    pub fn test_parameter(logn: usize) -> (Fr, VcParameter) {
         let mut rng = ark_std::test_rng();
-        VcParameter::new(3, &mut rng)
+        VcParameter::new(logn, &mut rng)
     }
 }
