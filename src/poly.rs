@@ -8,6 +8,7 @@ use std::ops::Sub;
 use ark_bls12_381::fr::Fr;
 use ark_ff::FftField;
 use ark_ff::Field;
+use rayon::prelude::*;
 
 /// Compute all unity of roots for n
 pub fn compute_unity(n: usize) -> Vec<Fr> {
@@ -31,7 +32,7 @@ where
 /// Compute FFT on a, where a can be any vector that supports scalar multiplication with Fr.
 pub fn poly_fft<T>(unity: &[Fr], a: &mut Vec<T>, n: usize)
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy,
+    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy + Sync + Send,
 {
     let n = n.next_power_of_two();
     assert!(n.is_power_of_two());
@@ -55,14 +56,30 @@ where
     while len <= n {
         let half_len = len / 2;
         let step = unity.len() / len;
-        for start in (0..n).step_by(len) {
-            for k in 0..half_len {
+        let result: Vec<_> = (0..n)
+            .step_by(len)
+            .flat_map(|start| iter::repeat(start).zip(0..half_len))
+            .par_bridge()
+            .map(|(start, k)| {
                 let u = a[start + k];
                 let t = a[start + k + half_len] * unity[k * step];
-                a[start + k] = u + t;
-                a[start + k + half_len] = u - t;
-            }
+                (start + k, u + t, u - t)
+            })
+            .collect();
+        for i in result {
+            a[i.0] = i.1;
+            a[i.0 + half_len] = i.2;
         }
+        // let half_len = len / 2;
+        // let step = unity.len() / len;
+        // for start in (0..n).step_by(len) {
+        //     for k in 0..half_len {
+        //         let u = a[start + k];
+        //         let t = a[start + k + half_len] * unity[k * step];
+        //         a[start + k] = u + t;
+        //         a[start + k + half_len] = u - t;
+        //     }
+        // }
         len *= 2;
     }
 }
@@ -70,7 +87,7 @@ where
 /// Compute iFFT on a, where a can be any vector that supports scalar multiplication with Fr.
 pub fn poly_ifft<T>(unity: &[Fr], a: &mut Vec<T>, n: usize)
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy,
+    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy + Sync + Send,
 {
     let n = n.next_power_of_two();
     assert!(n.is_power_of_two());
@@ -94,19 +111,35 @@ where
     while len <= n {
         let half_len = len / 2;
         let step = unity.len() / len;
-        for start in (0..n).step_by(len) {
-            for k in 0..half_len {
+        let result: Vec<_> = (0..n)
+            .step_by(len)
+            .flat_map(|start| iter::repeat(start).zip(0..half_len))
+            .par_bridge()
+            .map(|(start, k)| {
                 let u = a[start + k];
                 let t = a[start + k + half_len] * (Fr::ONE / unity[k * step]);
-                a[start + k] = u + t;
-                a[start + k + half_len] = u - t;
-            }
+                (start + k, u + t, u - t)
+            })
+            .collect();
+        for i in result {
+            a[i.0] = i.1;
+            a[i.0 + half_len] = i.2;
         }
+        // let half_len = len / 2;
+        // let step = unity.len() / len;
+        // for start in (0..n).step_by(len) {
+        //     for k in 0..half_len {
+        //         let u = a[start + k];
+        //         let t = a[start + k + half_len] * (Fr::ONE / unity[k * step]);
+        //         a[start + k] = u + t;
+        //         a[start + k + half_len] = u - t;
+        //     }
+        // }
         len *= 2;
     }
 
     let inv_n = Fr::ONE / Fr::from(n as u32);
-    a.iter_mut().for_each(|i| *i = *i * inv_n);
+    a.par_iter_mut().for_each(|i| *i = *i * inv_n);
 }
 
 /// Compute the zeroing polynomial in O(mlog^2 m), storing all intermediate results.
@@ -187,7 +220,14 @@ pub fn poly_delta(unity: &[Fr], x: &[Fr]) -> Vec<Fr> {
 /// Interpolate polynomial
 pub fn poly_interpolate<T>(unity: &[Fr], x: &[Fr], y: &[T]) -> Vec<T>
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+    T: Add<T, Output = T>
+        + Sub<T, Output = T>
+        + Mul<Fr, Output = T>
+        + PartialEq
+        + Default
+        + Copy
+        + Sync
+        + Send,
 {
     let logi = x.len().next_power_of_two().trailing_zeros();
 
@@ -277,7 +317,14 @@ pub fn poly_inverse(unity: &[Fr], mut poly: Vec<Fr>, m: usize) -> Vec<Fr> {
 /// Poly division
 pub fn poly_divide<T>(unity: &[Fr], mut f: Vec<T>, mut g: Vec<Fr>) -> (Vec<T>, Vec<T>)
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+    T: Add<T, Output = T>
+        + Sub<T, Output = T>
+        + Mul<Fr, Output = T>
+        + PartialEq
+        + Default
+        + Copy
+        + Sync
+        + Send,
 {
     trim_zeroes(&mut f);
     trim_zeroes(&mut g);
@@ -320,7 +367,14 @@ pub fn poly_evaluate_inner<T>(
     l: usize,
     r: usize,
 ) where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+    T: Add<T, Output = T>
+        + Sub<T, Output = T>
+        + Mul<Fr, Output = T>
+        + PartialEq
+        + Default
+        + Copy
+        + Sync
+        + Send,
 {
     if l + 1 == r {
         result[l] = poly
@@ -339,7 +393,14 @@ pub fn poly_evaluate_inner<T>(
 /// Evaluate poly at a list of points
 pub fn poly_evaluate<T>(unity: &[Fr], poly: &[T], x: &[Fr]) -> Vec<T>
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+    T: Add<T, Output = T>
+        + Sub<T, Output = T>
+        + Mul<Fr, Output = T>
+        + PartialEq
+        + Default
+        + Copy
+        + Sync
+        + Send,
 {
     let mut zero = vec![Vec::<Fr>::new(); x.len() << 2];
     poly_zero_inner(unity, x, &mut zero, 1, 0, x.len());

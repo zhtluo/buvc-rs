@@ -19,7 +19,7 @@ fn benchmark_update_witness_batch(c: &mut Criterion) {
     writeln!(file, "n,execution_time").expect("Could not write to file");
 
     // Iterate over values of logn to get n from 2 to 100
-    for logn in 1..=17 {  // log2(2) = 1, log2(100) ≈ 6.64, so iterate through logn from 1 to 7
+    for logn in 1..=6 {  // log2(2) = 1, log2(100) ≈ 6.64, so iterate through logn from 1 to 7
         let n = 1 << logn; // n = 2^logn, e.g., n = 2, 4, 8, 16, ...
 
         // Prepare test parameters using logn

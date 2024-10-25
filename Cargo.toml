@@ -10,8 +10,8 @@ ark-ff = { version = "0.4.0", features = ["asm"] }
 ark-bls12-381 = { version = "0.4.0" }
 ark-poly = { version = "0.4.0" }
 ark-serialize = { version = "0.4.0", features = ["derive"] }
-
 log = { version = "0.4.21" }
+rayon = "1.10"
 
 [dev-dependencies]
 clap = "4.5.4"
@@ -22,3 +22,6 @@ plotters = "0.3"
 [[bench]]
 name = "my_benchmark"
 harness = false
+
+[profile.bench]
+debug = true
