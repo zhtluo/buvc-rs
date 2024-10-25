@@ -3,7 +3,6 @@ use std::io::Write;
 use std::time::Instant;
 use ark_bls12_381::Fr;
 use criterion::{Criterion, SamplingMode, criterion_group, criterion_main};
-use plotters::prelude::*;
 
 use buvc_rs::vc_context::VcContext;
 use buvc_rs::vc_parameter::tests::test_parameter;
@@ -28,7 +27,7 @@ fn benchmark_update_witness_batch(c: &mut Criterion) {
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
 
         // Ensure vectors are consistent with n
-        let v: Vec<Fr> = (1..=n).map(|x| Fr::from(x as u64)).collect();  // No need for n.max(1)
+        let v: Vec<Fr> = (1..=n).map(|x| Fr::from(x as u64)).collect(); 
         let gq = vc_c.build_commitment(&v).1;  // This line will now have consistent input
         
         let alpha_len = n / 2;
@@ -58,36 +57,6 @@ fn benchmark_update_witness_batch(c: &mut Criterion) {
 
     // Finish the benchmark group
     group.finish();
-
-    // Plotting results
-    plot_results(times).expect("Plotting failed");
-}
-
-// Function to plot the results using Plotters
-fn plot_results(times: Vec<(usize, f64)>) -> Result<(), Box<dyn std::error::Error>> {
-    let root = BitMapBackend::new("benchmark_results.png", (640, 480)).into_drawing_area();
-    root.fill(&WHITE)?;
-
-    let max_time = times.iter().map(|(_, t)| *t).fold(0./0., f64::max);
-    let mut chart = ChartBuilder::on(&root)
-        .caption("Benchmark Results: n vs Time", ("sans-serif", 50).into_font())
-        .margin(5)
-        .x_label_area_size(30)
-        .y_label_area_size(30)
-        .build_cartesian_2d(2..100, 0f64..max_time)?;  // x-axis now ranges from n = 2 to n = 100
-
-    chart.configure_mesh().draw()?;
-
-    chart.draw_series(LineSeries::new(
-        times.into_iter().map(|(n, t)| (n as i32, t)), // Convert usize to i32
-        &RED,
-    ))?
-    .label("Execution Time")
-    .legend(|(x, y)| PathElement::new([(x, y), (x + 20, y)], &RED));
-    
-    chart.configure_series_labels().draw()?;
-
-    Ok(())
 }
 
 criterion_group!(benches, benchmark_update_witness_batch);
