@@ -545,7 +545,7 @@ mod tests {
 
     //Test for update_witness_batch
     #[test]
-    fn test_update_witness_batch() {
+    fn test_update_witnesses_batch() {
         let (_s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
 
