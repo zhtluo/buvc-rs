@@ -334,7 +334,7 @@ where
     if f.len() < g.len() {
         return (vec![T::default(); 1], f);
     }
-    let n = (f.len() + g.len()).next_power_of_two();
+    let n = (f.len() * 2).next_power_of_two();
     let mut ff = f.clone();
     let mut gg = g.clone();
     ff.reverse();
