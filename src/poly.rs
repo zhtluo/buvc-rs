@@ -54,32 +54,32 @@ where
 
     let mut len = 2;
     while len <= n {
-        let half_len = len / 2;
-        let step = unity.len() / len;
-        let result: Vec<_> = (0..n)
-            .step_by(len)
-            .flat_map(|start| iter::repeat(start).zip(0..half_len))
-            .par_bridge()
-            .map(|(start, k)| {
-                let u = a[start + k];
-                let t = a[start + k + half_len] * unity[k * step];
-                (start + k, u + t, u - t)
-            })
-            .collect();
-        for i in result {
-            a[i.0] = i.1;
-            a[i.0 + half_len] = i.2;
-        }
         // let half_len = len / 2;
         // let step = unity.len() / len;
-        // for start in (0..n).step_by(len) {
-        //     for k in 0..half_len {
+        // let result: Vec<_> = (0..n)
+        //     .step_by(len)
+        //     .flat_map(|start| iter::repeat(start).zip(0..half_len))
+        //     .par_bridge()
+        //     .map(|(start, k)| {
         //         let u = a[start + k];
         //         let t = a[start + k + half_len] * unity[k * step];
-        //         a[start + k] = u + t;
-        //         a[start + k + half_len] = u - t;
-        //     }
+        //         (start + k, u + t, u - t)
+        //     })
+        //     .collect();
+        // for i in result {
+        //     a[i.0] = i.1;
+        //     a[i.0 + half_len] = i.2;
         // }
+        let half_len = len / 2;
+        let step = unity.len() / len;
+        for start in (0..n).step_by(len) {
+            for k in 0..half_len {
+                let u = a[start + k];
+                let t = a[start + k + half_len] * unity[k * step];
+                a[start + k] = u + t;
+                a[start + k + half_len] = u - t;
+            }
+        }
         len *= 2;
     }
 }
@@ -109,32 +109,33 @@ where
 
     let mut len = 2;
     while len <= n {
-        let half_len = len / 2;
-        let step = unity.len() / len;
-        let result: Vec<_> = (0..n)
-            .step_by(len)
-            .flat_map(|start| iter::repeat(start).zip(0..half_len))
-            .par_bridge()
-            .map(|(start, k)| {
-                let u = a[start + k];
-                let t = a[start + k + half_len] * (Fr::ONE / unity[k * step]);
-                (start + k, u + t, u - t)
-            })
-            .collect();
-        for i in result {
-            a[i.0] = i.1;
-            a[i.0 + half_len] = i.2;
-        }
         // let half_len = len / 2;
         // let step = unity.len() / len;
-        // for start in (0..n).step_by(len) {
-        //     for k in 0..half_len {
+        // let result: Vec<_> = (0..n)
+        //     .step_by(len)
+        //     .flat_map(|start| iter::repeat(start).zip(0..half_len))
+        //     .par_bridge()
+        //     .map(|(start, k)| {
         //         let u = a[start + k];
         //         let t = a[start + k + half_len] * (Fr::ONE / unity[k * step]);
-        //         a[start + k] = u + t;
-        //         a[start + k + half_len] = u - t;
-        //     }
+        //         (start + k, u + t, u - t)
+        //     })
+        //     .collect();
+        // for i in result {
+        //     a[i.0] = i.1;
+        //     a[i.0 + half_len] = i.2;
         // }
+
+        let half_len = len / 2;
+        let step = unity.len() / len;
+        for start in (0..n).step_by(len) {
+            for k in 0..half_len {
+                let u = a[start + k];
+                let t = a[start + k + half_len] * (Fr::ONE / unity[k * step]);
+                a[start + k] = u + t;
+                a[start + k + half_len] = u - t;
+            }
+        }
         len *= 2;
     }
 
@@ -296,19 +297,21 @@ pub fn poly_inverse(unity: &[Fr], mut poly: Vec<Fr>, m: usize) -> Vec<Fr> {
     poly.resize(n, Fr::ZERO);
     let mut res = vec![Fr::ZERO; n];
     res[0] = Fr::ONE / poly[0];
-    poly_fft(unity, &mut poly, n);
-    poly_fft(unity, &mut res, n);
     let mut degree = 1;
     let two = Fr::from(2);
-    while degree < n {
+    while degree <= n {
+        let mut sub_poly: Vec<_> = poly.iter().take(degree).copied().collect();
+        poly_fft(unity, &mut sub_poly, degree << 1);
+        poly_fft(unity, &mut res, degree << 1);
         res = res
             .iter()
-            .zip(poly.iter())
+            .zip(sub_poly.iter())
             .map(|(i, j)| (two - i * j) * i)
             .collect();
+        poly_ifft(unity, &mut res, degree << 1);
+        res.truncate(degree);
         degree <<= 1;
     }
-    poly_ifft(unity, &mut res, n);
     res.truncate(m);
     trim_zeroes(&mut res);
     res
@@ -331,7 +334,7 @@ where
     if f.len() < g.len() {
         return (vec![T::default(); 1], f);
     }
-    let n = f.len().next_power_of_two();
+    let n = (f.len() + g.len()).next_power_of_two();
     let mut ff = f.clone();
     let mut gg = g.clone();
     ff.reverse();
@@ -448,6 +451,17 @@ mod tests {
                 [2, 1].map(Fr::from).to_vec(),
             ),
             ([1, 2].map(Fr::from).to_vec(), [1].map(Fr::from).to_vec(),)
+        );
+        assert_eq!(
+            poly_divide(
+                &unity,
+                [5, 4, -3, 2].map(Fr::from).to_vec(),
+                [2, 1].map(Fr::from).to_vec(),
+            ),
+            (
+                [18, -7, 2].map(Fr::from).to_vec(),
+                [-31].map(Fr::from).to_vec(),
+            )
         );
 
         assert_eq!(
