@@ -13,7 +13,7 @@ fn benchmark_update_witnesses_batch(c: &mut Criterion) {
     group.sampling_mode(SamplingMode::Flat).sample_size(10); // Reduce sample size for long tests
 
     // Iterate over values of logn to get n from 2 to 100
-    for logn in 1..=6 {
+    for logn in 1..=18 {
         // log2(2) = 1, log2(100) ≈ 6.64, so iterate through logn from 1 to 7
         let n = 1 << logn; // n = 2^logn, e.g., n = 2, 4, 8, 16, ...
 
@@ -38,7 +38,7 @@ fn benchmark_update_witnesses_batch(c: &mut Criterion) {
     }
 
     // Iterate over values of logn to get n from 2 to 100
-    for logn in 1..=6 {
+    for logn in 1..=12 {
         // log2(2) = 1, log2(100) ≈ 6.64, so iterate through logn from 1 to 7
         let n = 1 << logn; // n = 2^logn, e.g., n = 2, 4, 8, 16, ...
 
