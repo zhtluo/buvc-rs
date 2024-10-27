@@ -20,6 +20,10 @@ criterion = { version = "0.5", features = ["html_reports"] }
 plotters = "0.3"
 
 [[bench]]
+name = "update_witness_eth"
+harness = false
+
+[[bench]]
 name = "update_witness"
 harness = false
 
