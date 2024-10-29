@@ -20,17 +20,5 @@ criterion = { version = "0.5", features = ["html_reports"] }
 plotters = "0.3"
 
 [[bench]]
-<<<<<<< HEAD
 name = "my_benchmark"
 harness = false
-=======
-name = "update_witness"
-harness = false
-
-[[bench]]
-name = "fft"
-harness = false
-
-[profile.bench]
-debug = true
->>>>>>> 009f1125ba1fbab05c3c566fcd10b2b264e7690a
