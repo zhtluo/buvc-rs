@@ -44,7 +44,7 @@ impl VcContext {
 
         assert!(n <= vc_p.n);
         assert!(logn <= Fr::TWO_ADICITY as usize);
-        let unity: Vec<Fr> = compute_unity(n);
+        let unity: Vec<Fr> = compute_unity(n << 1);
 
         let mut gl: Vec<G1> = (0..n).map(|i| gs[n - i - 1]).collect();
         poly_fft(&unity, &mut gl, n);
@@ -268,9 +268,10 @@ impl VcContext {
     pub fn update_witnesses_batch_same(&self, alpha: &[usize], gq: &[G1], value: &[Fr]) -> Vec<G1> {
         let nf = &self.nf;
         let unity = &self.unity;
+        let step = unity.len() / self.n;
 
         //Compute coefficients of zeroing polynomial
-        let walpha = alpha.iter().map(|i| unity[*i]).collect::<Vec<Fr>>();
+        let walpha = alpha.iter().map(|i| unity[*i * step]).collect::<Vec<Fr>>();
         let g = poly_zero(unity, &walpha);
 
         //The derivative of the zeroing polynomial
@@ -364,7 +365,7 @@ impl VcContext {
             .map(|((g, (a, b)), (z, l))| g + l * (a / z) - *b * (Fr::ONE / z))
             .collect();
 
-        let llindex = alpha.iter().map(|i| self.gll[*i] * (unity[*i] / nf));
+        let llindex = alpha.iter().map(|i| self.gll[*i] * (unity[*i * step] / nf));
         nq.iter()
             .zip(llindex.zip(value.iter()))
             .map(|(n, (l, v))| n + l * v)
@@ -383,9 +384,10 @@ impl VcContext {
     ) -> Vec<G1> {
         let nf = &self.nf;
         let unity = &self.unity;
+        let step = unity.len() / self.n;
 
-        let walpha = alpha.iter().map(|i| unity[*i]).collect::<Vec<Fr>>();
-        let wbeta = beta.iter().map(|i| unity[*i]).collect::<Vec<Fr>>();
+        let walpha = alpha.iter().map(|i| unity[*i * step]).collect::<Vec<Fr>>();
+        let wbeta = beta.iter().map(|i| unity[*i * step]).collect::<Vec<Fr>>();
 
         let z = poly_zero(unity, &wbeta);
 
@@ -422,6 +424,21 @@ impl VcContext {
             .zip(zwalpha.iter().zip(lindex))
             .map(|((g, (a, b)), (z, l))| g + l * (a / z) - *b * (Fr::ONE / z))
             .collect()
+    }
+
+    pub fn update_witness(&self, alpha: usize, gq: G1, beta: usize, value: Fr) -> G1 {
+        let nf = &self.nf;
+        let unity = &self.unity;
+        let step = unity.len() / self.n;
+
+        let walpha = unity[alpha * step];
+        let wbeta = unity[beta * step];
+
+        if alpha != beta {
+            gq + (self.gl[alpha] - self.gl[beta]) * (value * wbeta / nf / (walpha - wbeta))
+        } else {
+            gq + self.gll[alpha] * (value * walpha / nf)
+        }
     }
 
     /// Produce a multi-proof given a list of proofs
@@ -543,7 +560,42 @@ mod tests {
         assert!(vc_c.verify_multi(&vc_p, gc, &index, &v[0..=6], gqq));
     }
 
-    //Test for update_witness_batch
+    #[test]
+    fn test_update_witness() {
+        let (_s, vc_p) = test_parameter(3);
+        let vc_c = VcContext::new(&vc_p, vc_p.logn);
+
+        let v = [1, 4, 5, 2, 3, 6, 7, 8].map(Fr::from); // Original values
+        let vd = [11, 4, 25, 22, 3, 36, 7, 8].map(Fr::from); // Updated values
+
+        let (gc, gq) = vc_c.build_commitment(&v);
+        let (gcd, _gqd) = vc_c.build_commitment(&vd);
+
+        let alpha = [1, 3, 5, 7];
+        let beta = [0, 2, 3, 5];
+
+        let mut updated_gq = [gq[1], gq[3], gq[5], gq[7]];
+        let delta_value = [Fr::from(10), Fr::from(20), Fr::from(20), Fr::from(30)];
+
+        for i in 0..alpha.len() {
+            for j in 0..beta.len() {
+                updated_gq[i] =
+                    vc_c.update_witness(alpha[i], updated_gq[i], beta[j], delta_value[j]);
+            }
+        }
+
+        let gc = vc_c.update_commitment(gc, beta[0], delta_value[0]);
+        let gc = vc_c.update_commitment(gc, beta[1], delta_value[1]);
+        let gc = vc_c.update_commitment(gc, beta[2], delta_value[2]);
+        let gc = vc_c.update_commitment(gc, beta[3], delta_value[3]);
+
+        assert!(gc == gcd);
+
+        for i in 0..alpha.len() {
+            assert!(vc_c.verify(&vc_p, gc, alpha[i], vd[alpha[i]], updated_gq[i]));
+        }
+    }
+
     #[test]
     fn test_update_witnesses_batch() {
         let (_s, vc_p) = test_parameter(3);
@@ -575,9 +627,8 @@ mod tests {
         }
     }
 
-    //Test for update_witness_batch_same
     #[test]
-    fn test_update_witness_batch_same() {
+    fn test_update_witnesses_batch_same() {
         let (_s, vc_p) = test_parameter(3);
         let vc_c = VcContext::new(&vc_p, vc_p.logn);
         let v = [1, 4, 5, 2, 3, 6, 7, 8].map(Fr::from);

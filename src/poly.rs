@@ -8,6 +8,7 @@ use std::ops::Sub;
 use ark_bls12_381::fr::Fr;
 use ark_ff::FftField;
 use ark_ff::Field;
+use rayon::prelude::*;
 
 /// Compute all unity of roots for n
 pub fn compute_unity(n: usize) -> Vec<Fr> {
@@ -31,7 +32,7 @@ where
 /// Compute FFT on a, where a can be any vector that supports scalar multiplication with Fr.
 pub fn poly_fft<T>(unity: &[Fr], a: &mut Vec<T>, n: usize)
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy,
+    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy + Sync + Send,
 {
     let n = n.next_power_of_two();
     assert!(n.is_power_of_two());
@@ -53,6 +54,22 @@ where
 
     let mut len = 2;
     while len <= n {
+        // let half_len = len / 2;
+        // let step = unity.len() / len;
+        // let result: Vec<_> = (0..n)
+        //     .step_by(len)
+        //     .flat_map(|start| iter::repeat(start).zip(0..half_len))
+        //     .par_bridge()
+        //     .map(|(start, k)| {
+        //         let u = a[start + k];
+        //         let t = a[start + k + half_len] * unity[k * step];
+        //         (start + k, u + t, u - t)
+        //     })
+        //     .collect();
+        // for i in result {
+        //     a[i.0] = i.1;
+        //     a[i.0 + half_len] = i.2;
+        // }
         let half_len = len / 2;
         let step = unity.len() / len;
         for start in (0..n).step_by(len) {
@@ -70,7 +87,7 @@ where
 /// Compute iFFT on a, where a can be any vector that supports scalar multiplication with Fr.
 pub fn poly_ifft<T>(unity: &[Fr], a: &mut Vec<T>, n: usize)
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy,
+    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + Default + Copy + Sync + Send,
 {
     let n = n.next_power_of_two();
     assert!(n.is_power_of_two());
@@ -92,6 +109,23 @@ where
 
     let mut len = 2;
     while len <= n {
+        // let half_len = len / 2;
+        // let step = unity.len() / len;
+        // let result: Vec<_> = (0..n)
+        //     .step_by(len)
+        //     .flat_map(|start| iter::repeat(start).zip(0..half_len))
+        //     .par_bridge()
+        //     .map(|(start, k)| {
+        //         let u = a[start + k];
+        //         let t = a[start + k + half_len] * (Fr::ONE / unity[k * step]);
+        //         (start + k, u + t, u - t)
+        //     })
+        //     .collect();
+        // for i in result {
+        //     a[i.0] = i.1;
+        //     a[i.0 + half_len] = i.2;
+        // }
+
         let half_len = len / 2;
         let step = unity.len() / len;
         for start in (0..n).step_by(len) {
@@ -106,7 +140,7 @@ where
     }
 
     let inv_n = Fr::ONE / Fr::from(n as u32);
-    a.iter_mut().for_each(|i| *i = *i * inv_n);
+    a.par_iter_mut().for_each(|i| *i = *i * inv_n);
 }
 
 /// Compute the zeroing polynomial in O(mlog^2 m), storing all intermediate results.
@@ -187,7 +221,14 @@ pub fn poly_delta(unity: &[Fr], x: &[Fr]) -> Vec<Fr> {
 /// Interpolate polynomial
 pub fn poly_interpolate<T>(unity: &[Fr], x: &[Fr], y: &[T]) -> Vec<T>
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+    T: Add<T, Output = T>
+        + Sub<T, Output = T>
+        + Mul<Fr, Output = T>
+        + PartialEq
+        + Default
+        + Copy
+        + Sync
+        + Send,
 {
     let logi = x.len().next_power_of_two().trailing_zeros();
 
@@ -256,19 +297,21 @@ pub fn poly_inverse(unity: &[Fr], mut poly: Vec<Fr>, m: usize) -> Vec<Fr> {
     poly.resize(n, Fr::ZERO);
     let mut res = vec![Fr::ZERO; n];
     res[0] = Fr::ONE / poly[0];
-    poly_fft(unity, &mut poly, n);
-    poly_fft(unity, &mut res, n);
     let mut degree = 1;
     let two = Fr::from(2);
-    while degree < n {
+    while degree <= n {
+        let mut sub_poly: Vec<_> = poly.iter().take(degree).copied().collect();
+        poly_fft(unity, &mut sub_poly, degree << 1);
+        poly_fft(unity, &mut res, degree << 1);
         res = res
             .iter()
-            .zip(poly.iter())
+            .zip(sub_poly.iter())
             .map(|(i, j)| (two - i * j) * i)
             .collect();
+        poly_ifft(unity, &mut res, degree << 1);
+        res.truncate(degree);
         degree <<= 1;
     }
-    poly_ifft(unity, &mut res, n);
     res.truncate(m);
     trim_zeroes(&mut res);
     res
@@ -277,14 +320,21 @@ pub fn poly_inverse(unity: &[Fr], mut poly: Vec<Fr>, m: usize) -> Vec<Fr> {
 /// Poly division
 pub fn poly_divide<T>(unity: &[Fr], mut f: Vec<T>, mut g: Vec<Fr>) -> (Vec<T>, Vec<T>)
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+    T: Add<T, Output = T>
+        + Sub<T, Output = T>
+        + Mul<Fr, Output = T>
+        + PartialEq
+        + Default
+        + Copy
+        + Sync
+        + Send,
 {
     trim_zeroes(&mut f);
     trim_zeroes(&mut g);
     if f.len() < g.len() {
         return (vec![T::default(); 1], f);
     }
-    let n = f.len().next_power_of_two();
+    let n = (f.len() * 2).next_power_of_two();
     let mut ff = f.clone();
     let mut gg = g.clone();
     ff.reverse();
@@ -320,7 +370,14 @@ pub fn poly_evaluate_inner<T>(
     l: usize,
     r: usize,
 ) where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+    T: Add<T, Output = T>
+        + Sub<T, Output = T>
+        + Mul<Fr, Output = T>
+        + PartialEq
+        + Default
+        + Copy
+        + Sync
+        + Send,
 {
     if l + 1 == r {
         result[l] = poly
@@ -339,7 +396,14 @@ pub fn poly_evaluate_inner<T>(
 /// Evaluate poly at a list of points
 pub fn poly_evaluate<T>(unity: &[Fr], poly: &[T], x: &[Fr]) -> Vec<T>
 where
-    T: Add<T, Output = T> + Sub<T, Output = T> + Mul<Fr, Output = T> + PartialEq + Default + Copy,
+    T: Add<T, Output = T>
+        + Sub<T, Output = T>
+        + Mul<Fr, Output = T>
+        + PartialEq
+        + Default
+        + Copy
+        + Sync
+        + Send,
 {
     let mut zero = vec![Vec::<Fr>::new(); x.len() << 2];
     poly_zero_inner(unity, x, &mut zero, 1, 0, x.len());
@@ -387,6 +451,17 @@ mod tests {
                 [2, 1].map(Fr::from).to_vec(),
             ),
             ([1, 2].map(Fr::from).to_vec(), [1].map(Fr::from).to_vec(),)
+        );
+        assert_eq!(
+            poly_divide(
+                &unity,
+                [5, 4, -3, 2].map(Fr::from).to_vec(),
+                [2, 1].map(Fr::from).to_vec(),
+            ),
+            (
+                [18, -7, 2].map(Fr::from).to_vec(),
+                [-31].map(Fr::from).to_vec(),
+            )
         );
 
         assert_eq!(
